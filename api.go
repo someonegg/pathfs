@@ -23,7 +23,7 @@ import (
 // make the file system thread-safe.
 type PathFileSystem interface {
 	// uFh may be 0.
-	GetAttr(ctx *Context, path string, uFh uint32) (attr *fuse.Attr, code fuse.Status)
+	GetAttr(ctx *Context, path string, uFh uint32, out *fuse.Attr) fuse.Status
 
 	Access(ctx *Context, path string, mask uint32) fuse.Status
 
@@ -74,9 +74,6 @@ type PathFileSystem interface {
 
 // Options sets options for the entire filesystem
 type Options struct {
-	// MountOptions contain the options for mounting the fuse server
-	fuse.MountOptions
-
 	// If set to nonnil, this defines the overall entry timeout
 	// for the file system. See fuse.EntryOut for more information.
 	EntryTimeout *time.Duration

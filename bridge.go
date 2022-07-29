@@ -123,14 +123,13 @@ func (b *rawBridge) Lookup(cancel <-chan struct{}, header *fuse.InHeader, name s
 }
 
 func (b *rawBridge) lookup(ctx *Context, path string, parent *inode, name string, out *fuse.EntryOut) fuse.Status {
-	attr, code := b.fs.GetAttr(ctx, path, 0)
+	code := b.fs.GetAttr(ctx, path, 0, &out.Attr)
 	if !code.Ok() {
 		return code
 	}
 
-	child := b.addChild(parent, name, newInode(attr.Ino, attr.IsDir()))
+	child := b.addChild(parent, name, newInode(out.Attr.Ino, out.Attr.IsDir()))
 
-	out.Attr = *attr
 	b.setEntryOut(child, out)
 	b.setEntryOutTimeout(out)
 	return fuse.OK
@@ -177,12 +176,11 @@ func (b *rawBridge) GetAttr(cancel <-chan struct{}, input *fuse.GetAttrIn, out *
 }
 
 func (b *rawBridge) getAttr(ctx *Context, path string, uFh uint32, out *fuse.AttrOut) fuse.Status {
-	attr, code := b.fs.GetAttr(ctx, path, uFh)
+	code := b.fs.GetAttr(ctx, path, uFh, &out.Attr)
 	if !code.Ok() {
 		return code
 	}
 
-	out.Attr = *attr
 	b.setAttr(out)
 	b.setAttrTimeout(out)
 	return fuse.OK

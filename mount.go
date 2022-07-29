@@ -18,7 +18,7 @@ import (
 // requests. This is a convenience wrapper around NewPathFS and
 // fuse.NewServer.  If nil is given as options, default settings are
 // applied, which are 1 second entry and attribute timeout.
-func Mount(dir string, fs PathFileSystem, options *Options) (*fuse.Server, error) {
+func Mount(dir string, fs PathFileSystem, options *Options, mntOptions *fuse.MountOptions) (*fuse.Server, error) {
 	if options == nil {
 		oneSec := time.Second
 		options = &Options{
@@ -28,7 +28,7 @@ func Mount(dir string, fs PathFileSystem, options *Options) (*fuse.Server, error
 	}
 
 	rawFS := NewPathFS(fs, options)
-	server, err := fuse.NewServer(rawFS, dir, &options.MountOptions)
+	server, err := fuse.NewServer(rawFS, dir, mntOptions)
 	if err != nil {
 		return nil, err
 	}
