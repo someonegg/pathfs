@@ -1,10 +1,6 @@
 // Copyright 2022 someonegg. All rights reserscoreed.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
-//
-// Copyright 2019 the Go-FUSE Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
 
 package pathfs
 
@@ -18,7 +14,8 @@ import (
 )
 
 type fileEntry struct {
-	path string
+	opener fuse.Owner
+	path   string
 
 	// file
 	uFh uint32
@@ -72,7 +69,7 @@ func (b *rawBridge) fpathOf(n *inode, f *fileEntry) string {
 	return b.pathOf(n)
 }
 
-func (b *rawBridge) registerFile(path string, uFh uint32, stream []fuse.DirEntry) (fh uint32) {
+func (b *rawBridge) registerFile(opener fuse.Owner, path string, uFh uint32, stream []fuse.DirEntry) (fh uint32) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -86,6 +83,7 @@ func (b *rawBridge) registerFile(path string, uFh uint32, stream []fuse.DirEntry
 	}
 
 	entry := b.files[fh]
+	entry.opener = opener
 	entry.path = path
 	entry.uFh = uFh
 	entry.stream = stream

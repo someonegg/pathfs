@@ -23,53 +23,53 @@ import (
 // make the file system thread-safe.
 type PathFileSystem interface {
 	// uFh may be 0.
-	GetAttr(ctx *fuse.Context, path string, uFh uint32) (attr *fuse.Attr, code fuse.Status)
+	GetAttr(ctx *Context, path string, uFh uint32) (attr *fuse.Attr, code fuse.Status)
 
-	Access(ctx *fuse.Context, path string, mask uint32) fuse.Status
+	Access(ctx *Context, path string, mask uint32) fuse.Status
 
 	// Tree structure
-	Mknod(ctx *fuse.Context, path string, mode uint32, dev uint32) fuse.Status
-	Mkdir(ctx *fuse.Context, path string, mode uint32) fuse.Status
-	Unlink(ctx *fuse.Context, path string) fuse.Status
-	Rmdir(ctx *fuse.Context, path string) fuse.Status
-	Rename(ctx *fuse.Context, path string, newPath string) fuse.Status
-	Link(ctx *fuse.Context, path string, newPath string) fuse.Status
+	Mknod(ctx *Context, path string, mode uint32, dev uint32) fuse.Status
+	Mkdir(ctx *Context, path string, mode uint32) fuse.Status
+	Unlink(ctx *Context, path string) fuse.Status
+	Rmdir(ctx *Context, path string) fuse.Status
+	Rename(ctx *Context, path string, newPath string) fuse.Status
+	Link(ctx *Context, path string, newPath string) fuse.Status
 
 	// Symlinks
-	Symlink(ctx *fuse.Context, path string, target string) fuse.Status
-	Readlink(ctx *fuse.Context, path string) (target string, code fuse.Status)
+	Symlink(ctx *Context, path string, target string) fuse.Status
+	Readlink(ctx *Context, path string) (target string, code fuse.Status)
 
 	// Extended attributes
-	GetXAttr(ctx *fuse.Context, path string, attr string) (data []byte, code fuse.Status)
-	ListXAttr(ctx *fuse.Context, path string) (attrs []string, code fuse.Status)
-	SetXAttr(ctx *fuse.Context, path string, attr string, data []byte, flags uint32) fuse.Status
-	RemoveXAttr(ctx *fuse.Context, path string, attr string) fuse.Status
+	GetXAttr(ctx *Context, path string, attr string) (data []byte, code fuse.Status)
+	ListXAttr(ctx *Context, path string) (attrs []string, code fuse.Status)
+	SetXAttr(ctx *Context, path string, attr string, data []byte, flags uint32) fuse.Status
+	RemoveXAttr(ctx *Context, path string, attr string) fuse.Status
 
 	// File
-	Create(ctx *fuse.Context, path string, flags uint32, mode uint32) (uFh uint32, code fuse.Status)
-	Open(ctx *fuse.Context, path string, flags uint32) (uFh uint32, keepCache bool, code fuse.Status)
+	Create(ctx *Context, path string, flags uint32, mode uint32) (uFh uint32, code fuse.Status)
+	Open(ctx *Context, path string, flags uint32) (uFh uint32, keepCache bool, code fuse.Status)
 
-	Read(ctx *fuse.Context, path string, uFh uint32, dest []byte, off uint64) (result fuse.ReadResult, code fuse.Status)
-	Write(ctx *fuse.Context, path string, uFh uint32, data []byte, off uint64) (written uint32, code fuse.Status)
-	Fallocate(ctx *fuse.Context, path string, uFh uint32, off uint64, size uint64, mode uint32) fuse.Status
-	Fsync(ctx *fuse.Context, path string, uFh uint32, flags uint32) fuse.Status
-	Flush(ctx *fuse.Context, path string, uFh uint32) fuse.Status
-	Release(ctx *fuse.Context, path string, uFh uint32)
+	Read(ctx *Context, path string, uFh uint32, dest []byte, off uint64) (result fuse.ReadResult, code fuse.Status)
+	Write(ctx *Context, path string, uFh uint32, data []byte, off uint64) (written uint32, code fuse.Status)
+	Fallocate(ctx *Context, path string, uFh uint32, off uint64, size uint64, mode uint32) fuse.Status
+	Fsync(ctx *Context, path string, uFh uint32, flags uint32) fuse.Status
+	Flush(ctx *Context, path string, uFh uint32) fuse.Status
+	Release(ctx *Context, path string, uFh uint32)
 
-	GetLk(ctx *fuse.Context, path string, uFh uint32, owner uint64, lk *fuse.FileLock, flags uint32, out *fuse.FileLock) fuse.Status
-	SetLk(ctx *fuse.Context, path string, uFh uint32, owner uint64, lk *fuse.FileLock, flags uint32) fuse.Status
-	SetLkw(ctx *fuse.Context, path string, uFh uint32, owner uint64, lk *fuse.FileLock, flags uint32) fuse.Status
+	GetLk(ctx *Context, path string, uFh uint32, owner uint64, lk *fuse.FileLock, flags uint32, out *fuse.FileLock) fuse.Status
+	SetLk(ctx *Context, path string, uFh uint32, owner uint64, lk *fuse.FileLock, flags uint32) fuse.Status
+	SetLkw(ctx *Context, path string, uFh uint32, owner uint64, lk *fuse.FileLock, flags uint32) fuse.Status
 
 	// uFh may be 0.
-	Chmod(ctx *fuse.Context, path string, uFh uint32, mode uint32) fuse.Status
-	Chown(ctx *fuse.Context, path string, uFh uint32, uid uint32, gid uint32) fuse.Status
-	Truncate(ctx *fuse.Context, path string, uFh uint32, size uint64) fuse.Status
-	Utimens(ctx *fuse.Context, path string, uFh uint32, atime *time.Time, mtime *time.Time) fuse.Status
+	Chmod(ctx *Context, path string, uFh uint32, mode uint32) fuse.Status
+	Chown(ctx *Context, path string, uFh uint32, uid uint32, gid uint32) fuse.Status
+	Truncate(ctx *Context, path string, uFh uint32, size uint64) fuse.Status
+	Utimens(ctx *Context, path string, uFh uint32, atime *time.Time, mtime *time.Time) fuse.Status
 
 	// Directory
-	Lsdir(ctx *fuse.Context, path string) (stream []fuse.DirEntry, code fuse.Status)
+	Lsdir(ctx *Context, path string) (stream []fuse.DirEntry, code fuse.Status)
 
-	StatFs(ctx *fuse.Context, path string, out *fuse.StatfsOut) fuse.Status
+	StatFs(ctx *Context, path string, out *fuse.StatfsOut) fuse.Status
 }
 
 // Options sets options for the entire filesystem
