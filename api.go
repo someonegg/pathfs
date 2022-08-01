@@ -16,12 +16,12 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-// PathFileSystem API that uses paths rather than inodes. A minimal
+// FileSystem API that uses paths rather than inodes. A minimal
 // file system should have at least a functional GetAttr method, and
 // the returned attr needs to have a valid Ino.
 // Typically, each call happens in its own goroutine, so take care to
 // make the file system thread-safe.
-type PathFileSystem interface {
+type FileSystem interface {
 	// uFh may be 0.
 	GetAttr(ctx *Context, path string, uFh uint32, out *fuse.Attr) fuse.Status
 

@@ -14,7 +14,7 @@ import (
 )
 
 type rawBridge struct {
-	fs      PathFileSystem
+	fs      FileSystem
 	options Options
 	root    *inode
 
@@ -29,7 +29,7 @@ type rawBridge struct {
 }
 
 // NewPathFS creates a path based filesystem.
-func NewPathFS(fs PathFileSystem, options *Options) fuse.RawFileSystem {
+func NewPathFS(fs FileSystem, options *Options) fuse.RawFileSystem {
 	if options == nil {
 		oneSec := time.Second
 		options = &Options{
