@@ -75,5 +75,8 @@ func newContext(cancel <-chan struct{}, caller fuse.Caller) *Context {
 }
 
 func releaseContext(ctx *Context) {
+	ctx.Cancel = nil
+	ctx.Caller = fuse.Caller{}
+	ctx.Opener = nil
 	contextPool.Put(ctx)
 }
