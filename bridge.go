@@ -111,7 +111,7 @@ func (b *rawBridge) Lookup(cancel <-chan struct{}, header *fuse.InHeader, name s
 	parent := b.inode(header.NodeId)
 	path := b.pathOf(parent) + "/" + name
 
-	code := b.lookup(ctx, path, parent, name, true, out)
+	code := b.lookup(ctx, path, parent, name, out)
 	if !code.Ok() {
 		b.rmChild(parent, name)
 		if b.options.NegativeTimeout != nil {
@@ -122,24 +122,13 @@ func (b *rawBridge) Lookup(cancel <-chan struct{}, header *fuse.InHeader, name s
 	return code
 }
 
-func (b *rawBridge) lookup(ctx *Context, path string, parent *inode, name string, mayExist bool, out *fuse.EntryOut) fuse.Status {
+func (b *rawBridge) lookup(ctx *Context, path string, parent *inode, name string, out *fuse.EntryOut) fuse.Status {
 	code := b.fs.GetAttr(ctx, path, 0, &out.Attr)
 	if !code.Ok() {
 		return code
 	}
 
-	var child *inode
-
-	if mayExist {
-		b.mu.Lock()
-		child = b.nodes[out.Attr.Ino]
-		b.mu.Unlock()
-	}
-	if child == nil {
-		child = newInode(out.Attr.Ino, out.Attr.IsDir())
-	}
-
-	child = b.addChild(parent, name, child)
+	child := b.addChild(parent, name, newInode(out.Attr.Ino, out.Attr.IsDir()))
 
 	b.setEntryOut(child, out)
 	b.setEntryOutTimeout(out)
@@ -251,7 +240,7 @@ func (b *rawBridge) Mknod(cancel <-chan struct{}, input *fuse.MknodIn, name stri
 		return code
 	}
 
-	return b.lookup(ctx, path, parent, name, false, out)
+	return b.lookup(ctx, path, parent, name, out)
 }
 
 func (b *rawBridge) Mkdir(cancel <-chan struct{}, input *fuse.MkdirIn, name string, out *fuse.EntryOut) fuse.Status {
@@ -266,7 +255,7 @@ func (b *rawBridge) Mkdir(cancel <-chan struct{}, input *fuse.MkdirIn, name stri
 		return code
 	}
 
-	return b.lookup(ctx, path, parent, name, false, out)
+	return b.lookup(ctx, path, parent, name, out)
 }
 
 func (b *rawBridge) Unlink(cancel <-chan struct{}, header *fuse.InHeader, name string) fuse.Status {
@@ -339,7 +328,7 @@ func (b *rawBridge) Link(cancel <-chan struct{}, input *fuse.LinkIn, name string
 		return code
 	}
 
-	return b.lookup(ctx, path, parent, name, false, out)
+	return b.lookup(ctx, path, parent, name, out)
 }
 
 func (b *rawBridge) Symlink(cancel <-chan struct{}, header *fuse.InHeader, target string, name string, out *fuse.EntryOut) fuse.Status {
@@ -354,7 +343,7 @@ func (b *rawBridge) Symlink(cancel <-chan struct{}, header *fuse.InHeader, targe
 		return code
 	}
 
-	return b.lookup(ctx, path, parent, name, false, out)
+	return b.lookup(ctx, path, parent, name, out)
 }
 
 func (b *rawBridge) Readlink(cancel <-chan struct{}, header *fuse.InHeader) ([]byte, fuse.Status) {
@@ -449,7 +438,7 @@ func (b *rawBridge) Create(cancel <-chan struct{}, input *fuse.CreateIn, name st
 		return code
 	}
 
-	code = b.lookup(ctx, path, parent, name, false, &out.EntryOut)
+	code = b.lookup(ctx, path, parent, name, &out.EntryOut)
 	if !code.Ok() {
 		return code
 	}
@@ -662,7 +651,7 @@ func (b *rawBridge) ReadDirPlus(cancel <-chan struct{}, input *fuse.ReadIn, out 
 			continue
 		}
 
-		b.lookup(ctx, path+"/"+e.Name, n, e.Name, false, entryOut)
+		b.lookup(ctx, path+"/"+e.Name, n, e.Name, entryOut)
 	}
 	return fuse.OK
 }
