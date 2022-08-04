@@ -369,14 +369,14 @@ func lockNode2(n1, n2 *inode) {
 func unlockNode2(n1, n2 *inode) {
 	if n1 == n2 {
 		if n1 != nil {
-			n1.mu.Lock()
+			n1.mu.Unlock()
 		}
 	} else {
 		if n1 != nil {
-			n1.mu.Lock()
+			n1.mu.Unlock()
 		}
 		if n2 != nil {
-			n2.mu.Lock()
+			n2.mu.Unlock()
 		}
 	}
 }
