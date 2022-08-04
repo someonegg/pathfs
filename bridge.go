@@ -128,7 +128,7 @@ func (b *rawBridge) lookup(ctx *Context, path string, parent *inode, name string
 		return code
 	}
 
-	child := b.addChild(parent, name, newInode(out.Attr.Ino, out.Attr.IsDir()))
+	child := b.addChild(parent, name, out.Attr.Ino, out.Attr.IsDir())
 
 	b.setEntryOut(child, out)
 	b.setEntryOutTimeout(out)
