@@ -100,33 +100,19 @@ func (b *rawBridge) setAttrInner(out *fuse.Attr) {
 	setBlocks(out)
 }
 
-// addChild inserts the child into the tree. child.ino will be used to
-// find an already-known node. If one is found, `child` is ignored and the
-// already-known one is used.
-func (b *rawBridge) addChild(parent *inode, name string, child *inode) *inode {
+// addChild inserts a child into the tree. The ino will be used to
+// find an already-known node. If not found, create one via newInode.
+func (b *rawBridge) addChild(parent *inode, name string, ino uint64, isDir bool) *inode {
 	if name == "." || name == ".." {
 		log.Panicf("BUG: tried to add virtual entry %q to the actual tree", name)
 	}
 
-	ino := child.ino
+	var child *inode
 
-	orig := child
 	for {
 		lockNode2(parent, child)
 		b.mu.Lock()
 		old := b.nodes[ino]
-		if old == nil {
-			if child == orig {
-				break
-			} else {
-				// old inode disappeared while we were looping here. Go back to
-				// original child.
-				b.mu.Unlock()
-				unlockNode2(parent, child)
-				child = orig
-				continue
-			}
-		}
 		if old == child {
 			// we now have the right inode locked
 			break
@@ -134,6 +120,11 @@ func (b *rawBridge) addChild(parent *inode, name string, child *inode) *inode {
 		b.mu.Unlock()
 		unlockNode2(parent, child)
 		child = old
+	}
+
+	if child == nil {
+		child = newInode(ino, isDir)
+		child.mu.Lock()
 	}
 
 	child.lookupCount++
@@ -341,24 +332,40 @@ func lockNodes(ns ...*inode) {
 	}
 }
 
-func lockNode2(a, b *inode) {
-	if a == b {
-		a.mu.Lock()
-	} else if nodeLess(a, b) {
-		a.mu.Lock()
-		b.mu.Lock()
+func lockNode2(n1, n2 *inode) {
+	if n1 == n2 {
+		if n1 != nil {
+			n1.mu.Lock()
+		}
+	} else if nodeLess(n1, n2) {
+		if n1 != nil {
+			n1.mu.Lock()
+		}
+		if n2 != nil {
+			n2.mu.Lock()
+		}
 	} else {
-		b.mu.Lock()
-		a.mu.Lock()
+		if n2 != nil {
+			n2.mu.Lock()
+		}
+		if n1 != nil {
+			n1.mu.Lock()
+		}
 	}
 }
 
-func unlockNode2(a, b *inode) {
-	if a == b {
-		a.mu.Unlock()
+func unlockNode2(n1, n2 *inode) {
+	if n1 == n2 {
+		if n1 != nil {
+			n1.mu.Unlock()
+		}
 	} else {
-		a.mu.Unlock()
-		b.mu.Unlock()
+		if n1 != nil {
+			n1.mu.Unlock()
+		}
+		if n2 != nil {
+			n2.mu.Unlock()
+		}
 	}
 }
 
