@@ -69,6 +69,13 @@ func (b *rawBridge) fpathOf(n *inode, f *fileEntry) string {
 	return b.pathOf(n)
 }
 
+func childPathOf(parent, child string) string {
+	if parent == "" {
+		return child
+	}
+	return parent + "/" + child
+}
+
 func (b *rawBridge) registerFile(opener fuse.Owner, path string, uFh uint32, stream []fuse.DirEntry) (fh uint32) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -109,7 +109,7 @@ func (b *rawBridge) Lookup(cancel <-chan struct{}, header *fuse.InHeader, name s
 	defer releaseContext(ctx)
 
 	parent := b.inode(header.NodeId)
-	path := b.pathOf(parent) + "/" + name
+	path := childPathOf(b.pathOf(parent), name)
 
 	code := b.lookup(ctx, path, parent, name, out)
 	if !code.Ok() {
@@ -233,7 +233,7 @@ func (b *rawBridge) Mknod(cancel <-chan struct{}, input *fuse.MknodIn, name stri
 	defer releaseContext(ctx)
 
 	parent := b.inode(input.NodeId)
-	path := b.pathOf(parent) + "/" + name
+	path := childPathOf(b.pathOf(parent), name)
 
 	code := b.fs.Mknod(ctx, path, input.Mode, input.Rdev)
 	if !code.Ok() {
@@ -248,7 +248,7 @@ func (b *rawBridge) Mkdir(cancel <-chan struct{}, input *fuse.MkdirIn, name stri
 	defer releaseContext(ctx)
 
 	parent := b.inode(input.NodeId)
-	path := b.pathOf(parent) + "/" + name
+	path := childPathOf(b.pathOf(parent), name)
 
 	code := b.fs.Mkdir(ctx, path, input.Mode)
 	if !code.Ok() {
@@ -263,7 +263,7 @@ func (b *rawBridge) Unlink(cancel <-chan struct{}, header *fuse.InHeader, name s
 	defer releaseContext(ctx)
 
 	parent := b.inode(header.NodeId)
-	path := b.pathOf(parent) + "/" + name
+	path := childPathOf(b.pathOf(parent), name)
 
 	code := b.fs.Unlink(ctx, path)
 	if !code.Ok() {
@@ -279,7 +279,7 @@ func (b *rawBridge) Rmdir(cancel <-chan struct{}, header *fuse.InHeader, name st
 	defer releaseContext(ctx)
 
 	parent := b.inode(header.NodeId)
-	path := b.pathOf(parent) + "/" + name
+	path := childPathOf(b.pathOf(parent), name)
 
 	code := b.fs.Rmdir(ctx, path)
 	if !code.Ok() {
@@ -299,10 +299,10 @@ func (b *rawBridge) Rename(cancel <-chan struct{}, input *fuse.RenameIn, name st
 	defer releaseContext(ctx)
 
 	parent := b.inode(input.NodeId)
-	path := b.pathOf(parent) + "/" + name
+	path := childPathOf(b.pathOf(parent), name)
 
 	newParent := b.inode(input.Newdir)
-	newPath := b.pathOf(newParent) + "/" + newName
+	newPath := childPathOf(b.pathOf(newParent), newName)
 
 	code := b.fs.Rename(ctx, path, newPath)
 	if !code.Ok() {
@@ -321,7 +321,7 @@ func (b *rawBridge) Link(cancel <-chan struct{}, input *fuse.LinkIn, name string
 	oldPath := b.pathOf(old)
 
 	parent := b.inode(input.NodeId)
-	path := b.pathOf(parent) + "/" + name
+	path := childPathOf(b.pathOf(parent), name)
 
 	code := b.fs.Link(ctx, oldPath, path)
 	if !code.Ok() {
@@ -336,7 +336,7 @@ func (b *rawBridge) Symlink(cancel <-chan struct{}, header *fuse.InHeader, targe
 	defer releaseContext(ctx)
 
 	parent := b.inode(header.NodeId)
-	path := b.pathOf(parent) + "/" + name
+	path := childPathOf(b.pathOf(parent), name)
 
 	code := b.fs.Symlink(ctx, path, target)
 	if !code.Ok() {
@@ -431,7 +431,7 @@ func (b *rawBridge) Create(cancel <-chan struct{}, input *fuse.CreateIn, name st
 	defer releaseContext(ctx)
 
 	parent := b.inode(input.NodeId)
-	path := b.pathOf(parent) + "/" + name
+	path := childPathOf(b.pathOf(parent), name)
 
 	uFh, code := b.fs.Create(ctx, path, input.Flags, input.Mode)
 	if !code.Ok() {
@@ -651,7 +651,7 @@ func (b *rawBridge) ReadDirPlus(cancel <-chan struct{}, input *fuse.ReadIn, out 
 			continue
 		}
 
-		b.lookup(ctx, path+"/"+e.Name, n, e.Name, entryOut)
+		b.lookup(ctx, childPathOf(path, e.Name), n, e.Name, entryOut)
 	}
 	return fuse.OK
 }
