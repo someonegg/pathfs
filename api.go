@@ -105,4 +105,10 @@ type Options struct {
 	// return error, but want to signal something seems off
 	// anyway. If unset, no messages are printed.
 	Logger *log.Logger
+
+	// if nil, default false. if true, enable direct io flag when open.
+	ForceOpenDirectIO *bool
+
+	// if nil, default false. if true, enable direct io flag when create.
+	ForceCreateDirectIO *bool
 }

@@ -442,7 +442,10 @@ func (b *rawBridge) Create(cancel <-chan struct{}, input *fuse.CreateIn, name st
 	if !code.Ok() {
 		return code
 	}
-
+	if b.options.ForceCreateDirectIO != nil &&
+		*b.options.ForceCreateDirectIO {
+		out.OpenFlags = fuse.FOPEN_DIRECT_IO
+	}
 	out.Fh = uint64(b.registerFile(input.Caller.Owner, path, uFh, nil))
 	return fuse.OK
 }
@@ -462,6 +465,10 @@ func (b *rawBridge) Open(cancel <-chan struct{}, input *fuse.OpenIn, out *fuse.O
 	out.Fh = uint64(b.registerFile(input.Caller.Owner, path, uFh, nil))
 	if keepCache {
 		out.OpenFlags = fuse.FOPEN_KEEP_CACHE
+	}
+	if b.options.ForceOpenDirectIO != nil &&
+		*b.options.ForceOpenDirectIO {
+		out.OpenFlags = fuse.FOPEN_DIRECT_IO
 	}
 	return fuse.OK
 }
