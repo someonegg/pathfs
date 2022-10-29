@@ -70,11 +70,11 @@ func (fs defaultFileSystem) RemoveXAttr(ctx *Context, path string, attr string) 
 }
 
 // File
-func (fs defaultFileSystem) Create(ctx *Context, path string, flags uint32, mode uint32) (uFh uint32, code fuse.Status) {
-	return 0, fuse.ENOSYS
-}
-func (fs defaultFileSystem) Open(ctx *Context, path string, flags uint32) (uFh uint32, keepCache bool, code fuse.Status) {
+func (fs defaultFileSystem) Create(ctx *Context, path string, flags uint32, mode uint32) (uFh uint32, forceDIO bool, code fuse.Status) {
 	return 0, false, fuse.ENOSYS
+}
+func (fs defaultFileSystem) Open(ctx *Context, path string, flags uint32) (uFh uint32, keepCache, forceDIO bool, code fuse.Status) {
+	return 0, false, false, fuse.ENOSYS
 }
 
 func (fs defaultFileSystem) Read(ctx *Context, path string, uFh uint32, dest []byte, off uint64) (result fuse.ReadResult, code fuse.Status) {

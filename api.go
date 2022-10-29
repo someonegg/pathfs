@@ -46,8 +46,8 @@ type FileSystem interface {
 	RemoveXAttr(ctx *Context, path string, attr string) fuse.Status
 
 	// File
-	Create(ctx *Context, path string, flags uint32, mode uint32) (uFh uint32, code fuse.Status)
-	Open(ctx *Context, path string, flags uint32) (uFh uint32, keepCache bool, code fuse.Status)
+	Create(ctx *Context, path string, flags uint32, mode uint32) (uFh uint32, forceDIO bool, code fuse.Status)
+	Open(ctx *Context, path string, flags uint32) (uFh uint32, keepCache, forceDIO bool, code fuse.Status)
 
 	Read(ctx *Context, path string, uFh uint32, dest []byte, off uint64) (result fuse.ReadResult, code fuse.Status)
 	Write(ctx *Context, path string, uFh uint32, data []byte, off uint64) (written uint32, code fuse.Status)
