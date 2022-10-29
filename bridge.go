@@ -433,16 +433,17 @@ func (b *rawBridge) Create(cancel <-chan struct{}, input *fuse.CreateIn, name st
 	parent := b.inode(input.NodeId)
 	path := childPathOf(b.pathOf(parent), name)
 
-	uFh, code := b.fs.Create(ctx, path, input.Flags, input.Mode)
+	uFh, forceDIO, code := b.fs.Create(ctx, path, input.Flags, input.Mode)
 	if !code.Ok() {
 		return code
 	}
-
 	code = b.lookup(ctx, path, parent, name, &out.EntryOut)
 	if !code.Ok() {
 		return code
 	}
-
+	if forceDIO {
+		out.OpenFlags |= fuse.FOPEN_DIRECT_IO
+	}
 	out.Fh = uint64(b.registerFile(input.Caller.Owner, path, uFh, nil))
 	return fuse.OK
 }
@@ -454,14 +455,16 @@ func (b *rawBridge) Open(cancel <-chan struct{}, input *fuse.OpenIn, out *fuse.O
 	n := b.inode(input.NodeId)
 	path := b.pathOf(n)
 
-	uFh, keepCache, code := b.fs.Open(ctx, path, input.Flags)
+	uFh, keepCache, forceDIO, code := b.fs.Open(ctx, path, input.Flags)
 	if !code.Ok() {
 		return code
 	}
 
 	out.Fh = uint64(b.registerFile(input.Caller.Owner, path, uFh, nil))
-	if keepCache {
-		out.OpenFlags = fuse.FOPEN_KEEP_CACHE
+	if forceDIO {
+		out.OpenFlags |= fuse.FOPEN_DIRECT_IO
+	} else if keepCache {
+		out.OpenFlags |= fuse.FOPEN_KEEP_CACHE
 	}
 	return fuse.OK
 }
