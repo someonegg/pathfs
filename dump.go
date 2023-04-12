@@ -35,7 +35,6 @@ type DumpInode struct {
 type DumpParentEntry struct {
 	Name string
 	Node uint64
-	Time time.Time
 }
 
 // 流式编码接口
@@ -44,6 +43,11 @@ type InodeIterator interface {
 	// 当返回EOF时，说明inodes已经编码完毕
 	// 会将inode转化为dumpinode后编码
 	Next() (data *DumpInode, err error) // 支持上层并发调用
+}
+
+type Copier interface {
+	Dump() (data *DumpRawBridge, iterator InodeIterator, err error)
+	Restore(data *DumpRawBridge) (filler InodeFiller, err error)
 }
 
 type InodeDumper struct {
@@ -72,11 +76,12 @@ func (s *InodeDumper) Next() (data *DumpInode, err error) {
 	node := s.inodes[s.off]
 	parents := node.parents
 	parentEntries := make([]DumpParentEntry, len(parents.other)+1)
+	times := make([]int64, len(parents.other)+1) // for sorting
 
 	// insert newest parent into slice
+	times[0] = time.Now().Unix()
 	parentEntries[0] = DumpParentEntry{
 		Name: parents.newest.name,
-		Time: time.Now(),
 	}
 	if parents.newest.node != nil {
 		parentEntries[0].Node = parents.newest.node.ino
@@ -86,12 +91,13 @@ func (s *InodeDumper) Next() (data *DumpInode, err error) {
 	for e, t := range parents.other {
 		parentEntries[i].Node = e.node.ino
 		parentEntries[i].Name = e.name
-		parentEntries[i].Time = t
+		times[i] = t.Unix()
 		i++
 	}
 	sort.Slice(parentEntries, func(i, j int) bool {
-		return parentEntries[i].Time.Unix() > parentEntries[i].Time.Unix()
+		return times[i] > times[j]
 	})
+
 	data = &DumpInode{
 		node.ino,
 		node.revision,
@@ -163,15 +169,18 @@ func (s *InodeRestorer) AddInode(dumpInode *DumpInode) error {
 
 	// process other parents
 	n := len(dumpParents)
+	t := time.Now().Unix()
 	for i := 1; i < n; i++ {
 		parInode = s.getDirInode(dumpParents[i].Node)
 		parInode.children[dumpParents[i].Name] = curInode
-		curInode.parents.other[parentEntry{name: dumpParents[i].Name, node: parInode}] = dumpParents[i].Time
+		// construct other parents' time according to the order in slice
+		curInode.parents.other[parentEntry{name: dumpParents[i].Name, node: parInode}] = time.Unix(t-int64(i), 0)
 	}
 
 	return nil
 }
 
+// restore root inode
 func (s *InodeRestorer) Finished() error {
 	var found bool
 	s.bridge.root, found = s.bridge.nodes[1]
