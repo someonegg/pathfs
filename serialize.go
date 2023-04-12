@@ -46,12 +46,12 @@ type InodeIterator interface {
 	Next() (data *DumpInode, err error) // 支持上层并发调用
 }
 
-type InodeMarshaller struct {
+type InodeDumper struct {
 	inodes []*inode // flatted inodes
 	off    int
 }
 
-func NewInodeMarshaller(inodesMap map[uint64]*inode) *InodeMarshaller {
+func NewInodeDumper(inodesMap map[uint64]*inode) *InodeDumper {
 	inodes := make([]*inode, len(inodesMap))
 	i := 0
 	for _, v := range inodesMap {
@@ -59,13 +59,13 @@ func NewInodeMarshaller(inodesMap map[uint64]*inode) *InodeMarshaller {
 		i++
 	}
 
-	return &InodeMarshaller{
+	return &InodeDumper{
 		inodes: inodes,
 		off:    0,
 	}
 }
 
-func (s *InodeMarshaller) Next() (data *DumpInode, err error) {
+func (s *InodeDumper) Next() (data *DumpInode, err error) {
 	if s.off >= len(s.inodes) {
 		return nil, io.EOF
 	}
@@ -111,13 +111,13 @@ type InodeFiller interface {
 	Finished() error
 }
 
-type InodeUnmarshaller struct {
+type InodeRestorer struct {
 	bridge *rawBridge
 }
 
 // if not found in bridge's inodes, insert a new one and return it
 // otherwise just return the existed one
-func (s *InodeUnmarshaller) getDirInode(ino uint64) *inode {
+func (s *InodeRestorer) getDirInode(ino uint64) *inode {
 	inodes := s.bridge.nodes
 	var ret *inode
 	var found bool
@@ -135,7 +135,7 @@ func (s *InodeUnmarshaller) getDirInode(ino uint64) *inode {
 	return ret
 }
 
-func (s *InodeUnmarshaller) AddInode(dumpInode *DumpInode) error {
+func (s *InodeRestorer) AddInode(dumpInode *DumpInode) error {
 	inodes := s.bridge.nodes
 	var curInode *inode
 	var found bool
@@ -172,7 +172,7 @@ func (s *InodeUnmarshaller) AddInode(dumpInode *DumpInode) error {
 	return nil
 }
 
-func (s *InodeUnmarshaller) Finished() error {
+func (s *InodeRestorer) Finished() error {
 	var found bool
 	s.bridge.root, found = s.bridge.nodes[1]
 	if !found {

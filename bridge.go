@@ -702,7 +702,7 @@ func (b *rawBridge) Dump() (data *DumpRawBridge, iterator InodeIterator, err err
 		FreeFiles:     b.freeFiles,
 	}
 
-	inodeStream := NewInodeMarshaller(b.nodes)
+	inodeStream := NewInodeDumper(b.nodes)
 
 	return data, inodeStream, nil
 
@@ -722,7 +722,7 @@ func (b *rawBridge) Restore(data *DumpRawBridge) (filler InodeFiller, err error)
 	b.files = files
 	b.freeFiles = data.FreeFiles
 
-	return &InodeUnmarshaller{
+	return &InodeRestorer{
 		bridge: b,
 	}, nil
 }
