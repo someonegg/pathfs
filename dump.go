@@ -42,7 +42,7 @@ type InodeIterator interface {
 	// 每调用一次，返回1个inode的编码数据
 	// 当返回EOF时，说明inodes已经编码完毕
 	// 会将inode转化为dumpinode后编码
-	Next() (data *DumpInode, err error) // 支持上层并发调用
+	Next() (data *DumpInode, err error)
 }
 
 type Copier interface {
@@ -112,7 +112,7 @@ func (s *InodeDumper) Next() (data *DumpInode, err error) {
 type InodeFiller interface {
 	// 每调用一次，内部解码传入的[]byte
 	// 解码为dumpinode后转为inode
-	AddInode(*DumpInode) error // 支持上层并发调用
+	AddInode(*DumpInode) error
 	// 当所有inode都被解码后，该方法会给inode填充children
 	Finished() error
 }
@@ -149,8 +149,11 @@ func (s *InodeRestorer) AddInode(dumpInode *DumpInode) error {
 		curInode = &inode{
 			ino: dumpInode.Ino,
 		}
-		curInode.parents.other = make(map[parentEntry]time.Time)
 		inodes[dumpInode.Ino] = curInode
+	}
+
+	if curInode.parents.other == nil {
+		curInode.parents.other = make(map[parentEntry]time.Time)
 	}
 
 	curInode.revision = dumpInode.Revision

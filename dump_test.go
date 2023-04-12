@@ -35,6 +35,8 @@ func constructDirTree(b *rawBridge) {
 		{"l1_r1", 5, false},
 		{"l2_d1", 6, true},
 		{"l2_r1", 7, false},
+		{"l3_d1", 8, true},
+		{"l3_d2", 9, true},
 	}
 
 	for i := 2; i <= 5; i++ {
@@ -46,9 +48,15 @@ func constructDirTree(b *rawBridge) {
 		b.addChild(inode2, files[i].name, files[i].ino, files[i].isDir)
 	}
 
+	inode6 := b.inode(6)
+	for i := 8; i <= 9; i++ {
+		b.addChild(inode6, files[i].name, files[i].ino, files[i].isDir)
+	}
+
 	// add symlink
 	b.addChild(b.inode(3), files[6].name, 6, files[6].isDir)
 	b.addChild(b.inode(4), files[7].name, 7, files[7].isDir)
+	b.addChild(b.inode(8), files[5].name, 5, files[5].isDir)
 
 }
 
@@ -63,12 +71,12 @@ func printDirTree(root *inode) {
 		prefix := make([]rune, level*3)
 		for i := 0; i < level; i++ {
 			if lastInLevel[i] {
-				prefix[2*i] = ' '
+				prefix[3*i] = ' '
 			} else {
-				prefix[2*i] = '│'
+				prefix[3*i] = '│'
 			}
-			prefix[2*i+1] = ' '
-			prefix[2*i+2] = ' '
+			prefix[3*i+1] = ' '
+			prefix[3*i+2] = ' '
 		}
 		var symbol string
 		if last {
@@ -189,5 +197,6 @@ func TestDump(t *testing.T) {
 
 	close(inodeChan)
 	<-finish
+	close(finish)
 
 }
