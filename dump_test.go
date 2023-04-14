@@ -1,7 +1,9 @@
 package pathfs
 
 import (
+	"container/list"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -36,7 +38,7 @@ func constructDirTree(b *rawBridge) {
 		{"l2_d1", 6, true},
 		{"l2_r1", 7, false},
 		{"l3_d1", 8, true},
-		{"l3_d2", 9, true},
+		{"l3_r1", 9, false},
 	}
 
 	for i := 2; i <= 5; i++ {
@@ -58,12 +60,11 @@ func constructDirTree(b *rawBridge) {
 	b.addChild(b.inode(4), files[7].name, 7, files[7].isDir)
 	b.addChild(b.inode(8), files[5].name, 5, files[5].isDir)
 
+	// let inode 9 be orphan
+	b.rmChild(inode6, files[9].name)
 }
 
 // print the directory tree in the format like "tree" command
-// level 0:1(0)
-// level 1:4(1) 5(1) 2(1) 3(1)
-// level 2:7(4,2) 6(3,2)
 func printDirTree(root *inode) {
 	var lastInLevel []bool
 
@@ -87,6 +88,7 @@ func printDirTree(root *inode) {
 		fmt.Printf("%s%s%s(%d)\n", string(prefix), symbol, node.parents.newest.name, node.ino)
 	}
 
+	fileCnt, dirCnt := 1, 1
 	var walk func(node *inode, level int)
 	walk = func(node *inode, level int) {
 		if level >= len(lastInLevel) {
@@ -96,11 +98,13 @@ func printDirTree(root *inode) {
 		cnt := 0
 		for _, child := range node.children {
 			cnt++
+			fileCnt++
 			last = cnt == len(node.children)
 			lastInLevel[level] = last
 			printBranch(level, last, child)
 			// is dir
 			if child.children != nil {
+				dirCnt++
 				walk(child, level+1)
 			}
 		}
@@ -110,55 +114,56 @@ func printDirTree(root *inode) {
 	fmt.Printf(".(%d)\n", root.ino)
 	walk(root, 0)
 
-	//type queueElement struct {
-	//	node  *inode
-	//	level int
-	//}
-	//q := list.New()
-	//q.PushBack(&queueElement{root, 0})
-	//level := -1
-	//var e *list.Element
-	//var qe *queueElement
-	//var parents inodeParents
-	//var parentStr strings.Builder
-	//
-	//// bfs
-	//for q.Len() > 0 {
-	//	e = q.Front()
-	//	qe = e.Value.(*queueElement)
-	//	if qe.level > level {
-	//		level++
-	//		fmt.Printf("\n level %d:", level)
-	//	}
-	//	// process parents
-	//	parents = qe.node.parents
-	//	parentStr.Reset()
-	//	if parents.newest.node != nil {
-	//		parentStr.WriteString(strconv.FormatUint(parents.newest.node.ino, 10))
-	//	} else {
-	//		parentStr.WriteString("0")
-	//	}
-	//	for p := range parents.other {
-	//		parentStr.WriteByte(',')
-	//		parentStr.WriteString(strconv.FormatUint(p.node.ino, 10))
-	//	}
-	//	// "ino(parents' ino):filename"
-	//	fmt.Printf("%d(%s):%s ", qe.node.ino, parentStr.String(), parents.newest.name)
-	//
-	//	for _, child := range qe.node.children {
-	//		if child.parents.newest.node == qe.node {
-	//			q.PushBack(&queueElement{child, qe.level + 1})
-	//		}
-	//	}
-	//	q.Remove(e)
-	//}
-	//print("\n")
+}
+
+// print some statistic data
+func printStatistic(bridge *rawBridge) {
+	type queueElement struct {
+		node  *inode
+		level int
+	}
+	q := list.New()
+	q.PushBack(&queueElement{bridge.root, 0})
+	level := -1
+	var e *list.Element
+	var qe *queueElement
+	var s strings.Builder
+	var node *inode
+	fileCnt, dirCnt := 0, 0
+
+	// bfs
+	for q.Len() > 0 {
+		fileCnt++
+		e = q.Front()
+		qe = e.Value.(*queueElement)
+		if qe.level > level {
+			level++
+			fmt.Printf("\nlevel %d:", level)
+		}
+		node = qe.node
+		s.Reset()
+		// "ino(lookupCount, parentCount):filename"
+		fmt.Printf(" %d(%d,%d):%s", node.ino, node.lookupCount, node.parents.count(), node.parents.newest.name)
+
+		if node.children != nil {
+			dirCnt++
+			for _, child := range node.children {
+				if child.parents.newest.node == qe.node {
+					q.PushBack(&queueElement{child, qe.level + 1})
+				}
+			}
+		}
+		q.Remove(e)
+	}
+	fmt.Printf("\n\nfileCnt:%d, dirCnt:%d, orphanCnt:%d\n\n", fileCnt, dirCnt, len(bridge.nodes)-fileCnt)
+
 }
 
 func TestDump(t *testing.T) {
 	senderBridge := newBridge()
 	constructDirTree(senderBridge)
 	printDirTree(senderBridge.root)
+	printStatistic(senderBridge)
 
 	// simulate IPC
 	inodeChan := make(chan *DumpInode)
@@ -171,7 +176,6 @@ func TestDump(t *testing.T) {
 
 	go func(dumpB *DumpRawBridge, d chan *DumpInode, f chan struct{}) {
 		receiverBridge := &rawBridge{}
-		receiverBridge.nodes = map[uint64]*inode{}
 		filler, err := receiverBridge.Restore(dumpB)
 		if err != nil {
 			panic(err)
@@ -187,6 +191,7 @@ func TestDump(t *testing.T) {
 			panic(err)
 		}
 		printDirTree(receiverBridge.root)
+		printStatistic(receiverBridge)
 
 		finish <- struct{}{}
 	}(dumpB, inodeChan, finish)

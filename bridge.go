@@ -686,13 +686,15 @@ func (b *rawBridge) StatFs(cancel <-chan struct{}, input *fuse.InHeader, out *fu
 }
 
 func (b *rawBridge) Dump() (data *DumpRawBridge, iterator InodeIterator, err error) {
-	files := make([]*DumpFileEntry, len(b.files))
-	for i, f := range b.files {
-		files[i] = &DumpFileEntry{
-			Opener: f.opener,
-			Path:   f.path,
-			UFh:    f.uFh,
-			Stream: f.stream, // may use deep copy
+	var files []*DumpFileEntry
+	for _, f := range b.files {
+		if f != nil {
+			files = append(files, &DumpFileEntry{
+				Opener: f.opener,
+				Path:   f.path,
+				UFh:    f.uFh,
+				Stream: f.stream, // may use deep copy
+			})
 		}
 	}
 
@@ -702,13 +704,14 @@ func (b *rawBridge) Dump() (data *DumpRawBridge, iterator InodeIterator, err err
 		FreeFiles:     b.freeFiles,
 	}
 
-	inodeStream := NewInodeDumper(b.nodes)
+	inodeIterator := NewInodeDumper(b.nodes)
 
-	return data, inodeStream, nil
+	return data, inodeIterator, nil
 
 }
 
 func (b *rawBridge) Restore(data *DumpRawBridge) (filler InodeFiller, err error) {
+	b.nodes = map[uint64]*inode{}
 	b.nodeCountHigh = data.NodeCountHigh
 	files := make([]*fileEntry, len(data.Files))
 	for i, v := range data.Files {

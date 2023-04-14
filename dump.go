@@ -51,7 +51,7 @@ type Copier interface {
 }
 
 type InodeDumper struct {
-	inodes []*inode // flatted inodes
+	inodes []*inode // flatted inodesMap
 	off    int
 }
 
@@ -75,28 +75,33 @@ func (s *InodeDumper) Next() (data *DumpInode, err error) {
 	}
 	node := s.inodes[s.off]
 	parents := node.parents
-	parentEntries := make([]DumpParentEntry, len(parents.other)+1)
-	times := make([]int64, len(parents.other)+1) // for sorting
+	n := parents.count()
+	var parentEntries []DumpParentEntry
 
-	// insert newest parent into slice
-	times[0] = time.Now().Unix()
-	parentEntries[0] = DumpParentEntry{
-		Name: parents.newest.name,
-	}
-	if parents.newest.node != nil {
-		parentEntries[0].Node = parents.newest.node.ino
-	}
+	if n > 0 {
+		parentEntries = make([]DumpParentEntry, n)
+		times := make([]int64, n) // for sorting
 
-	i := 1
-	for e, t := range parents.other {
-		parentEntries[i].Node = e.node.ino
-		parentEntries[i].Name = e.name
-		times[i] = t.Unix()
-		i++
+		// insert newest parent into slice
+		times[0] = time.Now().Unix()
+		parentEntries[0] = DumpParentEntry{
+			Name: parents.newest.name,
+		}
+		if parents.newest.node != nil {
+			parentEntries[0].Node = parents.newest.node.ino
+		}
+
+		i := 1
+		for e, t := range parents.other {
+			parentEntries[i].Node = e.node.ino
+			parentEntries[i].Name = e.name
+			times[i] = t.Unix()
+			i++
+		}
+		sort.Slice(parentEntries, func(i, j int) bool {
+			return times[i] > times[j]
+		})
 	}
-	sort.Slice(parentEntries, func(i, j int) bool {
-		return times[i] > times[j]
-	})
 
 	data = &DumpInode{
 		node.ino,
@@ -152,32 +157,37 @@ func (s *InodeRestorer) AddInode(dumpInode *DumpInode) error {
 		inodes[dumpInode.Ino] = curInode
 	}
 
-	if curInode.parents.other == nil {
-		curInode.parents.other = make(map[parentEntry]time.Time)
-	}
-
+	// restore other fields
 	curInode.revision = dumpInode.Revision
 	curInode.lookupCount = dumpInode.LookupCount
 
 	dumpParents := dumpInode.Parents
-	var parInode *inode
-
-	// process newest parent
-	parInode = s.getDirInode(dumpParents[0].Node)
-	parInode.children[dumpParents[0].Name] = curInode
-	curInode.parents.newest = parentEntry{
-		name: dumpParents[0].Name,
-		node: parInode,
-	}
-
-	// process other parents
 	n := len(dumpParents)
-	t := time.Now().Unix()
-	for i := 1; i < n; i++ {
-		parInode = s.getDirInode(dumpParents[i].Node)
-		parInode.children[dumpParents[i].Name] = curInode
-		// construct other parents' time according to the order in slice
-		curInode.parents.other[parentEntry{name: dumpParents[i].Name, node: parInode}] = time.Unix(t-int64(i), 0)
+
+	if n > 0 {
+		var parInode *inode
+
+		// process newest parent
+		parInode = s.getDirInode(dumpParents[0].Node)
+		parInode.children[dumpParents[0].Name] = curInode
+		curInode.parents.newest = parentEntry{
+			name: dumpParents[0].Name,
+			node: parInode,
+		}
+
+		// process other parents
+		if n > 1 {
+			if curInode.parents.other == nil {
+				curInode.parents.other = make(map[parentEntry]time.Time)
+			}
+			t := time.Now().Unix()
+			for i := 1; i < n; i++ {
+				parInode = s.getDirInode(dumpParents[i].Node)
+				parInode.children[dumpParents[i].Name] = curInode
+				// construct other parents' time according to the order in slice
+				curInode.parents.other[parentEntry{name: dumpParents[i].Name, node: parInode}] = time.Unix(t-int64(i), 0)
+			}
+		}
 	}
 
 	return nil
