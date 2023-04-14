@@ -37,11 +37,8 @@ type DumpParentEntry struct {
 	Node uint64
 }
 
-// 流式编码接口
 type InodeIterator interface {
-	// 每调用一次，返回1个inode的编码数据
-	// 当返回EOF时，说明inodes已经编码完毕
-	// 会将inode转化为dumpinode后编码
+	// returning io.EOF error means that all inodes has been dumped
 	Next() (data *DumpInode, err error)
 }
 
@@ -113,12 +110,9 @@ func (s *InodeDumper) Next() (data *DumpInode, err error) {
 	return data, nil
 }
 
-// 流式编码接口
 type InodeFiller interface {
-	// 每调用一次，内部解码传入的[]byte
-	// 解码为dumpinode后转为inode
 	AddInode(*DumpInode) error
-	// 当所有inode都被解码后，该方法会给inode填充children
+	// update bridge's root, may be removed
 	Finished() error
 }
 
@@ -200,6 +194,5 @@ func (s *InodeRestorer) Finished() error {
 	if !found {
 		return errors.New("root inode not found")
 	}
-	s.bridge.root.parents.other = nil
 	return nil
 }
