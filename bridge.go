@@ -92,6 +92,10 @@ func (b *rawBridge) String() string {
 	return "pathfs"
 }
 
+func (b *rawBridge) NodeCount() int {
+	return len(b.nodes)
+}
+
 func (b *rawBridge) SetDebug(debug bool) {}
 
 func (b *rawBridge) Access(cancel <-chan struct{}, input *fuse.AccessIn) fuse.Status {
@@ -686,22 +690,20 @@ func (b *rawBridge) StatFs(cancel <-chan struct{}, input *fuse.InHeader, out *fu
 }
 
 func (b *rawBridge) Dump() (data *DumpRawBridge, iterator InodeIterator, err error) {
-	var files []*DumpFileEntry
-	for _, f := range b.files {
-		if f != nil {
-			files = append(files, &DumpFileEntry{
-				Opener: f.opener,
-				Path:   f.path,
-				UFh:    f.uFh,
-				Stream: f.stream, // may use deep copy
-			})
+	files := make([]*DumpFileEntry, len(b.files))
+	for i, f := range b.files {
+		files[i] = &DumpFileEntry{
+			Opener: f.opener,
+			Path:   f.path,
+			UFh:    f.uFh,
+			Stream: f.stream,
 		}
 	}
 
 	data = &DumpRawBridge{
-		NodeCountHigh: b.nodeCountHigh,
-		Files:         files,
-		FreeFiles:     b.freeFiles,
+		NodeCount: b.NodeCount(),
+		Files:     files,
+		FreeFiles: b.freeFiles,
 	}
 
 	inodeIterator := NewInodeDumper(b.nodes)
@@ -712,7 +714,6 @@ func (b *rawBridge) Dump() (data *DumpRawBridge, iterator InodeIterator, err err
 
 func (b *rawBridge) Restore(data *DumpRawBridge) (filler InodeFiller, err error) {
 	b.nodes = map[uint64]*inode{}
-	b.nodeCountHigh = data.NodeCountHigh
 	files := make([]*fileEntry, len(data.Files))
 	for i, v := range data.Files {
 		files[i] = &fileEntry{
@@ -726,6 +727,7 @@ func (b *rawBridge) Restore(data *DumpRawBridge) (filler InodeFiller, err error)
 	b.freeFiles = data.FreeFiles
 
 	return &InodeRestorer{
-		bridge: b,
+		bridge:    b,
+		nodeCount: data.NodeCount,
 	}, nil
 }

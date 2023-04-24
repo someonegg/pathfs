@@ -2,10 +2,9 @@ package pathfs
 
 import (
 	"errors"
+	"fmt"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"io"
-	"sort"
-	"time"
 )
 
 type DumpFileEntry struct {
@@ -20,9 +19,9 @@ type DumpFileEntry struct {
 }
 
 type DumpRawBridge struct {
-	NodeCountHigh int
-	Files         []*DumpFileEntry
-	FreeFiles     []uint32
+	NodeCount int
+	Files     []*DumpFileEntry
+	FreeFiles []uint32
 }
 
 type DumpInode struct {
@@ -30,6 +29,7 @@ type DumpInode struct {
 	Revision    uint32
 	LookupCount uint32
 	Parents     []DumpParentEntry
+	IsDir       bool
 }
 
 type DumpParentEntry struct {
@@ -71,40 +71,13 @@ func (s *InodeDumper) Next() (data *DumpInode, err error) {
 		return nil, io.EOF
 	}
 	node := s.inodes[s.off]
-	parents := node.parents
-	n := parents.count()
-	var parentEntries []DumpParentEntry
-
-	if n > 0 {
-		parentEntries = make([]DumpParentEntry, n)
-		times := make([]int64, n) // for sorting
-
-		// insert newest parent into slice
-		times[0] = time.Now().Unix()
-		parentEntries[0] = DumpParentEntry{
-			Name: parents.newest.name,
-		}
-		if parents.newest.node != nil {
-			parentEntries[0].Node = parents.newest.node.ino
-		}
-
-		i := 1
-		for e, t := range parents.other {
-			parentEntries[i].Node = e.node.ino
-			parentEntries[i].Name = e.name
-			times[i] = t.Unix()
-			i++
-		}
-		sort.Slice(parentEntries, func(i, j int) bool {
-			return times[i] > times[j]
-		})
-	}
 
 	data = &DumpInode{
 		node.ino,
 		node.revision,
 		node.lookupCount,
-		parentEntries,
+		node.parents.Dump(),
+		node.isDir(),
 	}
 	s.off++
 	return data, nil
@@ -117,7 +90,9 @@ type InodeFiller interface {
 }
 
 type InodeRestorer struct {
-	bridge *rawBridge
+	nodeCount    int
+	addNodeCount int
+	bridge       *rawBridge
 }
 
 // if not found in bridge's inodes, insert a new one and return it
@@ -132,15 +107,12 @@ func (s *InodeRestorer) getDirInode(ino uint64) *inode {
 			children: make(map[string]*inode),
 		}
 		inodes[ino] = ret
-	} else {
-		if ret.children == nil {
-			ret.children = make(map[string]*inode)
-		}
 	}
 	return ret
 }
 
 func (s *InodeRestorer) AddInode(dumpInode *DumpInode) error {
+
 	inodes := s.bridge.nodes
 	var curInode *inode
 	var found bool
@@ -154,45 +126,45 @@ func (s *InodeRestorer) AddInode(dumpInode *DumpInode) error {
 	// restore other fields
 	curInode.revision = dumpInode.Revision
 	curInode.lookupCount = dumpInode.LookupCount
+	if dumpInode.IsDir && curInode.children == nil {
+		curInode.children = make(map[string]*inode)
+	}
 
 	dumpParents := dumpInode.Parents
 	n := len(dumpParents)
+	var parInode *inode
 
-	if n > 0 {
-		var parInode *inode
-
-		// process newest parent
-		parInode = s.getDirInode(dumpParents[0].Node)
-		parInode.children[dumpParents[0].Name] = curInode
-		curInode.parents.newest = parentEntry{
-			name: dumpParents[0].Name,
-			node: parInode,
-		}
-
-		// process other parents
-		if n > 1 {
-			if curInode.parents.other == nil {
-				curInode.parents.other = make(map[parentEntry]time.Time)
-			}
-			t := time.Now().Unix()
-			for i := 1; i < n; i++ {
-				parInode = s.getDirInode(dumpParents[i].Node)
-				parInode.children[dumpParents[i].Name] = curInode
-				// construct other parents' time according to the order in slice
-				curInode.parents.other[parentEntry{name: dumpParents[i].Name, node: parInode}] = time.Unix(t-int64(i), 0)
-			}
-		}
+	for i := 0; i < n; i++ {
+		parInode = s.getDirInode(dumpParents[i].Node)
+		parInode.children[dumpParents[i].Name] = curInode
+		curInode.parents.add(parentEntry{name: dumpParents[i].Name, node: parInode})
 	}
+
+	s.addNodeCount++
 
 	return nil
 }
 
-// restore root inode
+// Finished restore root inode and verify inode's count
 func (s *InodeRestorer) Finished() error {
-	var found bool
-	s.bridge.root, found = s.bridge.nodes[1]
-	if !found {
+	bridge := s.bridge
+
+	if root, found := s.bridge.nodes[1]; !found {
 		return errors.New("root inode not found")
+	} else {
+		bridge.root = root
 	}
+
+	if s.addNodeCount < s.nodeCount {
+		for _, n := range s.bridge.nodes {
+			if n.revision == 0 {
+				bridge.logf("warning: inode %d is lost.\n", n.ino)
+			}
+		}
+		return fmt.Errorf("expected %d inodes, but only got %d inodes", s.nodeCount, s.addNodeCount)
+	}
+
+	s.bridge.nodeCountHigh = len(s.bridge.nodes)
+
 	return nil
 }

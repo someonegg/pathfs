@@ -8,7 +8,10 @@
 
 package pathfs
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 type parentEntry struct {
 	name string
@@ -107,4 +110,36 @@ func (p *inodeParents) count() int {
 		return 0
 	}
 	return 1 + len(p.other)
+}
+
+func (p *inodeParents) Dump() []DumpParentEntry {
+	n := p.count()
+	var parentEntries []DumpParentEntry
+
+	if n > 0 {
+		parentEntries = make([]DumpParentEntry, n)
+		times := make([]time.Time, n) // for sorting
+
+		// insert newest parent into slice
+		times[0] = time.Now()
+		parentEntries[0] = DumpParentEntry{
+			Name: p.newest.name,
+		}
+		if p.newest.node != nil {
+			parentEntries[0].Node = p.newest.node.ino
+		}
+
+		i := 1
+		for e, t := range p.other {
+			parentEntries[i].Node = e.node.ino
+			parentEntries[i].Name = e.name
+			times[i] = t
+			i++
+		}
+		sort.Slice(parentEntries, func(i, j int) bool {
+			return times[i].Before(times[j])
+		})
+	}
+
+	return parentEntries
 }

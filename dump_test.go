@@ -39,6 +39,7 @@ func constructDirTree(b *rawBridge) {
 		{"l2_r1", 7, false},
 		{"l3_d1", 8, true},
 		{"l3_r1", 9, false},
+		{"l4_r1", 10, false},
 	}
 
 	for i := 2; i <= 5; i++ {
@@ -55,13 +56,22 @@ func constructDirTree(b *rawBridge) {
 		b.addChild(inode6, files[i].name, files[i].ino, files[i].isDir)
 	}
 
+	b.addChild(b.inode(8), files[10].name, 10, files[10].isDir)
+
 	// add symlink
-	b.addChild(b.inode(3), files[6].name, 6, files[6].isDir)
 	b.addChild(b.inode(4), files[7].name, 7, files[7].isDir)
 	b.addChild(b.inode(8), files[5].name, 5, files[5].isDir)
 
-	// let inode 9 be orphan
+	// remove inode 5 from root
+	b.rmChild(b.root, files[5].name)
+
+	// remove inode 9
 	b.rmChild(inode6, files[9].name)
+	b.removeRef(b.inode(9), 1)
+
+	// let inode 10 be orphan
+	b.rmChild(b.inode(8), files[10].name)
+
 }
 
 // print the directory tree in the format like "tree" command
@@ -88,7 +98,6 @@ func printDirTree(root *inode) {
 		fmt.Printf("%s%s%s(%d)\n", string(prefix), symbol, node.parents.newest.name, node.ino)
 	}
 
-	fileCnt, dirCnt := 1, 1
 	var walk func(node *inode, level int)
 	walk = func(node *inode, level int) {
 		if level >= len(lastInLevel) {
@@ -98,13 +107,11 @@ func printDirTree(root *inode) {
 		cnt := 0
 		for _, child := range node.children {
 			cnt++
-			fileCnt++
 			last = cnt == len(node.children)
 			lastInLevel[level] = last
 			printBranch(level, last, child)
 			// is dir
 			if child.children != nil {
-				dirCnt++
 				walk(child, level+1)
 			}
 		}
@@ -155,7 +162,8 @@ func printStatistic(bridge *rawBridge) {
 		}
 		q.Remove(e)
 	}
-	fmt.Printf("\n\nfileCnt:%d, dirCnt:%d, orphanCnt:%d\n\n", fileCnt, dirCnt, len(bridge.nodes)-fileCnt)
+	fmt.Printf("\n\nfileCnt:%d, dirCnt:%d, orphanCnt:%d\n\n",
+		fileCnt, dirCnt, len(bridge.nodes)-fileCnt)
 
 }
 
