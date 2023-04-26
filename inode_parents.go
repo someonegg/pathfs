@@ -113,33 +113,50 @@ func (p *inodeParents) count() int {
 }
 
 func (p *inodeParents) Dump() []DumpParentEntry {
+	parents := sortParents(p)
+	parentEntries := make([]DumpParentEntry, len(parents))
+	for i := range parents {
+		parentEntries[i].Name = parents[i].name
+		parentEntries[i].Node = parents[i].node.ino
+	}
+	return parentEntries
+}
+
+type sortableParents struct {
+	parents []parentEntry
+	times   []time.Time
+}
+
+func (p *sortableParents) Less(i, j int) bool {
+	return p.times[i].Before(p.times[j])
+}
+
+func (p *sortableParents) Len() int {
+	return len(p.parents)
+}
+
+func (p *sortableParents) Swap(i, j int) {
+	p.parents[i], p.parents[j] = p.parents[j], p.parents[i]
+	p.times[i], p.times[j] = p.times[j], p.times[i]
+}
+
+func sortParents(p *inodeParents) []parentEntry {
 	n := p.count()
-	var parentEntries []DumpParentEntry
-
 	if n > 0 {
-		parentEntries = make([]DumpParentEntry, n)
-		times := make([]time.Time, n) // for sorting
-
-		// insert newest parent into slice
+		parents := make([]parentEntry, n)
+		times := make([]time.Time, n)
+		parents[0] = p.newest
 		times[0] = time.Now()
-		parentEntries[0] = DumpParentEntry{
-			Name: p.newest.name,
-		}
-		if p.newest.node != nil {
-			parentEntries[0].Node = p.newest.node.ino
-		}
-
 		i := 1
 		for e, t := range p.other {
-			parentEntries[i].Node = e.node.ino
-			parentEntries[i].Name = e.name
+			parents[i] = e
 			times[i] = t
 			i++
 		}
-		sort.Slice(parentEntries, func(i, j int) bool {
-			return times[i].Before(times[j])
+		sort.Sort(&sortableParents{
+			parents, times,
 		})
+		return parents
 	}
-
-	return parentEntries
+	return nil
 }

@@ -130,14 +130,11 @@ func (s *InodeRestorer) AddInode(dumpInode *DumpInode) error {
 		curInode.children = make(map[string]*inode)
 	}
 
-	dumpParents := dumpInode.Parents
-	n := len(dumpParents)
 	var parInode *inode
-
-	for i := 0; i < n; i++ {
-		parInode = s.getDirInode(dumpParents[i].Node)
-		parInode.children[dumpParents[i].Name] = curInode
-		curInode.parents.add(parentEntry{name: dumpParents[i].Name, node: parInode})
+	for _, p := range dumpInode.Parents {
+		parInode = s.getDirInode(p.Node)
+		parInode.children[p.Name] = curInode
+		curInode.parents.add(parentEntry{name: p.Name, node: parInode})
 	}
 
 	s.addNodeCount++

@@ -1,9 +1,7 @@
 package pathfs
 
 import (
-	"container/list"
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -59,10 +57,13 @@ func constructDirTree(b *rawBridge) {
 	b.addChild(b.inode(8), files[10].name, 10, files[10].isDir)
 
 	// add symlink
+	b.addChild(b.inode(3), files[7].name, 7, files[7].isDir)
 	b.addChild(b.inode(4), files[7].name, 7, files[7].isDir)
+	b.addChild(b.inode(6), files[7].name, 7, files[7].isDir)
+	b.addChild(b.inode(8), files[7].name, 7, files[7].isDir)
 	b.addChild(b.inode(8), files[5].name, 5, files[5].isDir)
 
-	// remove inode 5 from root
+	// remove inode 5 from root, but don't forget it
 	b.rmChild(b.root, files[5].name)
 
 	// remove inode 9
@@ -71,6 +72,62 @@ func constructDirTree(b *rawBridge) {
 
 	// let inode 10 be orphan
 	b.rmChild(b.inode(8), files[10].name)
+
+}
+
+func sameParentEntry(e1, e2 parentEntry) bool {
+	if e1.name != e2.name {
+		return false
+	}
+	if e1.node != nil && e2.node != nil {
+		return e1.node.ino == e2.node.ino
+	}
+	return e1.node == e2.node
+}
+
+// failed if new inode isn't exactly the same with old inode
+func assertSameInode(t *testing.T, old, new *inode) {
+	if new == nil {
+		t.Errorf("want inode %d, have nil", old.ino)
+		return
+	}
+	if old.ino != new.ino {
+		t.Errorf("want ino %d, have %d", old.ino, new.ino)
+		return
+	}
+	prefix := fmt.Sprintf("inode %d want", old.ino)
+	if old.lookupCount != new.lookupCount {
+		t.Errorf("%s lookupCount %d, have %d", prefix, old.lookupCount, new.lookupCount)
+	}
+	if old.revision != new.revision {
+		t.Errorf("%s revivion %d, have %d", prefix, old.revision, new.revision)
+	}
+
+	// check if two inodes have same children
+	if len(old.children) != len(new.children) {
+		t.Errorf("%s %d children, have %d", prefix, len(old.children), len(new.children))
+	}
+	for name, child1 := range old.children {
+		if child2, found := new.children[name]; found {
+			if child2.ino != child1.ino {
+				t.Errorf("%s children inode %d, have %d", prefix, child1.ino, child2.ino)
+			}
+		} else {
+			t.Errorf("%s children inode %d, have nil", prefix, child1.ino)
+		}
+	}
+
+	// check if two inodes have same parents
+	if old.parents.count() != new.parents.count() {
+		t.Errorf("%s %d parents, have %d", prefix, old.parents.count(), new.parents.count())
+	}
+	parents1 := sortParents(&old.parents)
+	parents2 := sortParents(&new.parents)
+	for i := range parents1 {
+		if !sameParentEntry(parents1[i], parents2[i]) {
+			t.Errorf("%s inode %d to be parent %d, have inode %d", prefix, parents1[i].node.ino, i, parents2[i].node.ino)
+		}
+	}
 
 }
 
@@ -123,55 +180,9 @@ func printDirTree(root *inode) {
 
 }
 
-// print some statistic data
-func printStatistic(bridge *rawBridge) {
-	type queueElement struct {
-		node  *inode
-		level int
-	}
-	q := list.New()
-	q.PushBack(&queueElement{bridge.root, 0})
-	level := -1
-	var e *list.Element
-	var qe *queueElement
-	var s strings.Builder
-	var node *inode
-	fileCnt, dirCnt := 0, 0
-
-	// bfs
-	for q.Len() > 0 {
-		fileCnt++
-		e = q.Front()
-		qe = e.Value.(*queueElement)
-		if qe.level > level {
-			level++
-			fmt.Printf("\nlevel %d:", level)
-		}
-		node = qe.node
-		s.Reset()
-		// "ino(lookupCount, parentCount):filename"
-		fmt.Printf(" %d(%d,%d):%s", node.ino, node.lookupCount, node.parents.count(), node.parents.newest.name)
-
-		if node.children != nil {
-			dirCnt++
-			for _, child := range node.children {
-				if child.parents.newest.node == qe.node {
-					q.PushBack(&queueElement{child, qe.level + 1})
-				}
-			}
-		}
-		q.Remove(e)
-	}
-	fmt.Printf("\n\nfileCnt:%d, dirCnt:%d, orphanCnt:%d\n\n",
-		fileCnt, dirCnt, len(bridge.nodes)-fileCnt)
-
-}
-
 func TestDump(t *testing.T) {
 	senderBridge := newBridge()
 	constructDirTree(senderBridge)
-	printDirTree(senderBridge.root)
-	printStatistic(senderBridge)
 
 	// simulate IPC
 	inodeChan := make(chan *DumpInode)
@@ -179,27 +190,25 @@ func TestDump(t *testing.T) {
 
 	dumpB, iter, err := senderBridge.Dump()
 	if err != nil {
-		panic(err)
+		t.Error(err)
 	}
 
+	receiverBridge := &rawBridge{}
 	go func(dumpB *DumpRawBridge, d chan *DumpInode, f chan struct{}) {
-		receiverBridge := &rawBridge{}
 		filler, err := receiverBridge.Restore(dumpB)
 		if err != nil {
-			panic(err)
+			t.Error(err)
 		}
 		for dumpInode, ok := <-d; ok; dumpInode, ok = <-d {
 			err = filler.AddInode(dumpInode)
 			if err != nil {
-				panic(err)
+				t.Error(err)
 			}
 		}
 		err = filler.Finished()
 		if err != nil {
-			panic(err)
+			t.Error(err)
 		}
-		printDirTree(receiverBridge.root)
-		printStatistic(receiverBridge)
 
 		finish <- struct{}{}
 	}(dumpB, inodeChan, finish)
@@ -212,4 +221,33 @@ func TestDump(t *testing.T) {
 	<-finish
 	close(finish)
 
+	// check if all inodes in two bridges are exactly the same
+	oldNodeCnt, newNodeCnt := len(senderBridge.nodes), len(receiverBridge.nodes)
+	if oldNodeCnt != newNodeCnt {
+		t.Errorf("want %d inodes, have %d inodes", oldNodeCnt, newNodeCnt)
+	}
+	for ino, old := range senderBridge.nodes {
+		assertSameInode(t, old, receiverBridge.nodes[ino])
+	}
+
+	oldDirCnt, newDirCnt := 0, 0
+	for _, node := range senderBridge.nodes {
+		if node.isDir() {
+			oldDirCnt++
+		}
+	}
+	for _, node := range receiverBridge.nodes {
+		if node.isDir() {
+			newDirCnt++
+		}
+	}
+	if oldDirCnt != newDirCnt {
+		t.Errorf("want %d directories, have %d", oldDirCnt, newDirCnt)
+	}
+
+	// print directory tree if test failed
+	if t.Failed() {
+		printDirTree(senderBridge.root)
+		printDirTree(receiverBridge.root)
+	}
 }
