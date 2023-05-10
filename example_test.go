@@ -1,9 +1,9 @@
 package pathfs
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"io"
 	"os"
 	fp "path/filepath"
 	"syscall"
@@ -85,7 +85,7 @@ func Example_dir() {
 	// create a file in an existing directory
 	filePath := fp.Join(dirPath, "test_file")
 	fd, err := syscall.Open(filePath, syscall.O_CREAT, regPerm)
-	defer syscall.Close(fd)
+	err = syscall.Close(fd)
 	assertError(err, nil)
 	err = syscall.Stat(filePath, &st)
 	assertError(err, nil)
@@ -110,25 +110,33 @@ func Example_dir() {
 	err = syscall.Stat(subFilePath, &st)
 	assertError(err, nil)
 
-	// link temp_file to root
+	// link test_file to root
 	rootFilePath := fp.Join(mountPoint, "test_file")
 	err = syscall.Link(subFilePath, rootFilePath)
 	assertError(err, nil)
 	printDir(mountPoint)
 
-	// unlink temp_file from sub_dir
+	// unlink test_file from sub_dir
 	err = syscall.Unlink(subFilePath)
 	assertError(err, nil)
 	err = syscall.Stat(subFilePath, &st)
 	assertError(err, syscall.ENOENT)
 	printDir(mountPoint)
 
-	// unlink temp_file from root
+	// symLink test_file to sub_dir TODO fix ENODEV bug
+	err = syscall.Symlink(rootFilePath, subFilePath)
+	assertError(err, nil)
+	err = syscall.Stat(subFilePath, &st)
+	assertError(err, nil)
+	printDir(subDirPath)
+
+	// unlink test_file from root
 	err = syscall.Unlink(rootFilePath)
 	assertError(err, nil)
 	err = syscall.Stat(rootFilePath, &st)
 	assertError(err, syscall.ENOENT)
 	printDir(mountPoint)
+	printDir(subDirPath)
 
 	// clear test files
 	err = syscall.Rmdir(subDirPath)
@@ -143,7 +151,14 @@ func Example_dir() {
 	// test_dir
 	// test_file
 	//
+	// temp_file
+	//
 	// test_dir
+	//
+	// test_file
+	//
+	// test_dir
+	//
 
 }
 
@@ -152,25 +167,35 @@ func Example_io() {
 	defer umount(server)
 	testFilePath := fp.Join(mountPoint, "test_file")
 
-	testContent := []byte("test_content")
+	testContent := []byte("test_content,test_content,test_content,test_content")
 
-	// create a file and write some content
-	file, err := os.Create(testFilePath)
-	defer file.Close()
-	assertError(err, nil)
-	_, err = file.Write(testContent)
+	// create a file and write some buf
+	func() {
+		file, err := os.Create(testFilePath)
+		defer file.Close()
+		assertError(err, nil)
+		_, err = file.Write(testContent)
+		assertError(err, nil)
+	}()
+
+	// reopen the file and verify the buf
+	fd, err := syscall.Open(testFilePath, syscall.O_APPEND, 0)
+	defer syscall.Close(fd)
 	assertError(err, nil)
 
-	// reopen the file and verify the content
-	file, err = os.Open(testFilePath)
-	defer file.Close()
+	buf := bytes.Buffer{}
+	bs := make([]byte, 16)
+	n, err := syscall.Read(fd, bs)
+	buf.Write(bs)
+	for n == 16 && err == nil {
+		n, err = syscall.Read(fd, bs)
+		buf.Write(bs[:n])
+	}
 	assertError(err, nil)
-	content, err := io.ReadAll(file)
-	assertError(err, nil)
-	fmt.Println(string(content))
+	fmt.Println(buf.String())
 
 	// Output:
-	// test_content
+	// test_content,test_content,test_content,test_content
 
 }
 
@@ -218,23 +243,23 @@ func TestAttr(t *testing.T) {
 	attr, err := getXAttr(path, "testattr")
 	assertError(err, nil)
 	if string(attr) != testAttrData {
-		t.Errorf("want xattr %s, have %s", testAttrData, string(attr))
+		t.Errorf("want: xattr %s, have: %s", testAttrData, string(attr))
 	}
 
 	attrs, err := listXAttr(path)
 	assertError(err, nil)
 	if len(attrs) != 1 {
-		t.Errorf("want xattr count %d, have %d", 1, len(attrs))
+		t.Errorf("want: xattr count %d, have: %d", 1, len(attrs))
 	}
 	if attrs[0] != testAttr {
-		t.Errorf("want xattr %s, have %s", testAttr, attrs[0])
+		t.Errorf("want: xattr %s, have: %s", testAttr, attrs[0])
 	}
 
 	err = removeXAttr(path, testAttr)
 	assertError(err, nil)
 	attrs, err = listXAttr(path)
 	if len(attrs) != 0 {
-		t.Errorf("want xattr count %d, have %d", 0, len(attrs))
+		t.Errorf("want: xattr count %d, have: %d", 0, len(attrs))
 	}
 
 }

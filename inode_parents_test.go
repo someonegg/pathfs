@@ -4,6 +4,16 @@ import (
 	"testing"
 )
 
+func sameParentEntry(e1, e2 parentEntry) bool {
+	if e1.name != e2.name {
+		return false
+	}
+	if e1.node != nil && e2.node != nil {
+		return e1.node.ino == e2.node.ino
+	}
+	return e1.node == e2.node
+}
+
 func TestInodeParents(t *testing.T) {
 	var p inodeParents
 	var ino1, ino2, ino3 inode

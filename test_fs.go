@@ -90,7 +90,7 @@ func (fs *testFileSystem) Link(ctx *Context, path string, newPath string) fuse.S
 }
 
 func (fs *testFileSystem) Symlink(ctx *Context, path string, target string) fuse.Status {
-	return fuse.ToStatus(os.Symlink(fs.absPath(path), fs.absPath(target)))
+	return fuse.ToStatus(syscall.Symlink(target, fs.absPath(path)))
 }
 
 func (fs *testFileSystem) Readlink(ctx *Context, path string) (target string, code fuse.Status) {
@@ -122,7 +122,7 @@ func (fs *testFileSystem) Read(ctx *Context, path string, uFh uint32, dest []byt
 	if uFh > 3 {
 		_, err = syscall.Pread(int(uFh), dest, int64(off))
 	} else {
-		f, err := os.Open(path)
+		f, err := os.Open(fs.absPath(path))
 		defer f.Close()
 		if err != nil {
 			return nil, fuse.ToStatus(err)
@@ -292,5 +292,8 @@ func (fs *testFileSystem) RemoveXAttr(ctx *Context, path string, attr string) fu
 		return fuse.ENODATA
 	}
 	delete(m, attr)
+	if len(m) == 0 {
+		delete(fs.xattrs, path)
+	}
 	return fuse.OK
 }
