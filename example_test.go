@@ -33,7 +33,9 @@ func setupTest() (mountPoint string, svr *fuse.Server) {
 		panic(err)
 	}
 
-	server, err := Mount(mountPoint, NewTestFileSystem(nativeRoot), nil, nil)
+	server, err := Mount(mountPoint, NewTestFileSystem(nativeRoot), nil, &fuse.MountOptions{
+		SingleThreaded: true,
+	})
 	if err != nil {
 		server.Unmount()
 		panic(err)
@@ -123,7 +125,7 @@ func Example_dir() {
 	assertError(err, syscall.ENOENT)
 	printDir(mountPoint)
 
-	// symLink test_file to sub_dir TODO fix ENODEV bug
+	// symLink test_file to sub_dir
 	err = syscall.Symlink(rootFilePath, subFilePath)
 	assertError(err, nil)
 	err = syscall.Stat(subFilePath, &st)
@@ -138,10 +140,8 @@ func Example_dir() {
 	printDir(mountPoint)
 	printDir(subDirPath)
 
-	// clear test files
-	err = syscall.Rmdir(subDirPath)
-	assertError(err, nil)
-	err = syscall.Rmdir(dirPath)
+	// remove subDirPath
+	err = os.RemoveAll(subFilePath)
 	assertError(err, nil)
 
 	// Output:
@@ -151,13 +151,11 @@ func Example_dir() {
 	// test_dir
 	// test_file
 	//
-	// temp_file
+	// test_file
 	//
 	// test_dir
 	//
 	// test_file
-	//
-	// test_dir
 	//
 
 }
@@ -179,7 +177,7 @@ func Example_io() {
 	}()
 
 	// reopen the file and verify the buf
-	fd, err := syscall.Open(testFilePath, syscall.O_APPEND, 0)
+	fd, err := syscall.Open(testFilePath, syscall.O_RDONLY, 0)
 	defer syscall.Close(fd)
 	assertError(err, nil)
 

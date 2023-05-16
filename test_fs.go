@@ -44,11 +44,7 @@ func (fs *testFileSystem) absPath(relPath string) string {
 func (fs *testFileSystem) GetAttr(ctx *Context, path string, uFh uint32, out *fuse.Attr) fuse.Status {
 	var err error
 	st := syscall.Stat_t{}
-	if uFh > 3 {
-		err = syscall.Fstat(int(uFh), &st)
-	} else {
-		err = syscall.Stat(fs.absPath(path), &st)
-	}
+	err = syscall.Lstat(fs.absPath(path), &st)
 
 	if err != nil {
 		return fuse.ToStatus(err)
