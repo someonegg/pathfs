@@ -1,7 +1,6 @@
 package pathfs
 
 import (
-	"errors"
 	"syscall"
 	"testing"
 	"time"
@@ -48,7 +47,7 @@ func getXAttrSyscall(path string, attr string, dest []byte) (sz int, err error) 
 		0, 0)
 
 	if errNo != 0 {
-		err = errors.New(errNo.Error())
+		err = error(errNo)
 	}
 	return int(size), err
 }
@@ -75,7 +74,7 @@ func listXAttrSyscall(path string, dest []byte) (sz int, err error) {
 		0, 0, 0)
 
 	if errNo != 0 {
-		err = errors.New(errNo.Error())
+		err = error(errNo)
 	}
 	return int(size), err
 }
@@ -98,7 +97,7 @@ func setXAttr(path string, attr string, data []byte, flags int) error {
 		uintptr(flags), 0)
 
 	if errNo != 0 {
-		err = errors.New(errNo.Error())
+		err = error(errNo)
 	}
 	return err
 }
@@ -118,7 +117,7 @@ func removeXAttr(path string, attr string) error {
 		uintptr(unsafe.Pointer(attrbs)), 0)
 
 	if errNo != 0 {
-		err = errors.New(errNo.Error())
+		err = error(errNo)
 	}
 	return err
 }

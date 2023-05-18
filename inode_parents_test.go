@@ -62,4 +62,28 @@ func TestInodeParents(t *testing.T) {
 	if len(all) != len(all2) {
 		t.Errorf("want=%d have=%d", len(all), len(all2))
 	}
+
+	// test sortParents
+	sorted := sortParents(&p)
+	n := p.count()
+	if sorted[n-1] != p.newest {
+		t.Errorf("want inode %d to be newest parents, have inode %d", p.newest.node.ino, sorted[n-1].node.ino)
+	}
+	for i := 1; i < n-1; i++ {
+		prev, cur := sorted[i-1], sorted[i]
+		if !p.other[cur].After(p.other[prev]) {
+			t.Errorf("want parent inode %d to be newer than %d", cur.node.ino, prev.node.ino)
+		}
+	}
+
+	// test delete
+	// swap entry 2 and 3 to cover all statements
+	all[1], all[2] = all[2], all[1]
+	for i := n - 1; i >= 0; i-- {
+		p.delete(all[i])
+		if count := p.count(); count != i {
+			t.Errorf("want=%d have=%d", len(all)-i-1, count)
+		}
+	}
+
 }

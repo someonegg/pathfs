@@ -1,52 +1,52 @@
 package pathfs
 
 import (
-	"fmt"
 	"sync"
 	"testing"
 )
 
 // failed if new inode isn't exactly the same with old inode
+// assume that old inode is not nil
 func assertSameInode(t *testing.T, old, new *inode) {
 	if new == nil {
-		t.Errorf("want inode %d, have nil", old.ino)
+		t.Errorf("want inode: %d, have: nil", old.ino)
 		return
 	}
 	if old.ino != new.ino {
-		t.Errorf("want ino %d, have %d", old.ino, new.ino)
+		t.Errorf("want ino: %d, have: %d", old.ino, new.ino)
 		return
 	}
-	prefix := fmt.Sprintf("inode %d want", old.ino)
+
 	if old.lookupCount != new.lookupCount {
-		t.Errorf("%s lookupCount %d, have %d", prefix, old.lookupCount, new.lookupCount)
+		t.Errorf("inode %d want lookupCount: %d, have: %d", new.ino, old.lookupCount, new.lookupCount)
 	}
 	if old.revision != new.revision {
-		t.Errorf("%s revivion %d, have %d", prefix, old.revision, new.revision)
+		t.Errorf("inode %d want revivion: %d, have: %d", new.ino, old.revision, new.revision)
 	}
 
 	// check if two inodes have same children
 	if len(old.children) != len(new.children) {
-		t.Errorf("%s %d children, have %d", prefix, len(old.children), len(new.children))
+		t.Errorf("inode %d want children's count: %d, have: %d", new.ino, len(old.children), len(new.children))
 	}
 	for name, child1 := range old.children {
 		if child2, found := new.children[name]; found {
 			if child2.ino != child1.ino {
-				t.Errorf("%s children inode %d, have %d", prefix, child1.ino, child2.ino)
+				t.Errorf("inode %d want children %s to be inode: %d, have: %d", new.ino, name, child1.ino, child2.ino)
 			}
 		} else {
-			t.Errorf("%s children inode %d, have nil", prefix, child1.ino)
+			t.Errorf("inode %d want children %s to be inode %d, have nil", new.ino, name, child1.ino)
 		}
 	}
 
 	// check if two inodes have same parents
 	if old.parents.count() != new.parents.count() {
-		t.Errorf("%s %d parents, have %d", prefix, old.parents.count(), new.parents.count())
+		t.Errorf("inode %d want parents' count: %d, have: %d", new.ino, old.parents.count(), new.parents.count())
 	}
 	parents1 := sortParents(&old.parents)
 	parents2 := sortParents(&new.parents)
 	for i := range parents1 {
 		if !sameParentEntry(parents1[i], parents2[i]) {
-			t.Errorf("%s inode %d to be parent %d, have inode %d", prefix, parents1[i].node.ino, i, parents2[i].node.ino)
+			t.Errorf("inode %d want parent %d to be inode: %d, have: %d", new.ino, i, parents1[i].node.ino, parents2[i].node.ino)
 		}
 	}
 
@@ -63,7 +63,7 @@ func TestAddAndRmChild(t *testing.T) {
 		{"l2_d1", 6, true},
 		{"l2_r1", 7, false},
 		{"l2_d2", 8, true},
-		{"l2_f2", 9, false},
+		{"l2_r2", 9, false},
 	}
 
 	var wg sync.WaitGroup
@@ -83,7 +83,7 @@ func TestAddAndRmChild(t *testing.T) {
 		t.Errorf("want inode 1 children's count: %d, have: %d", 4, len(b.root.children))
 	}
 	if b.inode(4).parents.get().node != b.root {
-		t.Errorf("want inode 4' parent to be: %d, have: %d", b.root.ino, b.inode(4).parents.get().node.ino)
+		t.Errorf("want inode 4' parent to be: inode %d, have: inode %d", b.root.ino, b.inode(4).parents.get().node.ino)
 	}
 
 	inode2 := b.inode(2)
@@ -201,6 +201,7 @@ func TestRemoveRef(t *testing.T) {
 	if len(b.inode(3).children) != 0 {
 		t.Errorf("want inode 3 children's count: %d, have: %d", 1, len(b.inode(3).children))
 	}
+	// inode 7's lookupCount reach 0 when removeRef, so child 7 of inode 4 is removed
 	if len(b.inode(4).children) != 0 {
 		t.Errorf("want inode 4 children's count: %d, have: %d", 0, len(b.inode(4).children))
 	}

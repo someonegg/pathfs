@@ -3,7 +3,6 @@ package pathfs
 import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -42,10 +41,8 @@ func (fs *testFileSystem) absPath(relPath string) string {
 }
 
 func (fs *testFileSystem) GetAttr(ctx *Context, path string, uFh uint32, out *fuse.Attr) fuse.Status {
-	var err error
 	st := syscall.Stat_t{}
-	err = syscall.Lstat(fs.absPath(path), &st)
-
+	err := syscall.Lstat(fs.absPath(path), &st)
 	if err != nil {
 		return fuse.ToStatus(err)
 	}
@@ -63,7 +60,7 @@ func (fs *testFileSystem) Mknod(ctx *Context, path string, mode uint32, dev uint
 }
 
 func (fs *testFileSystem) Mkdir(ctx *Context, path string, mode uint32) (code fuse.Status) {
-	return fuse.ToStatus(os.Mkdir(fs.absPath(path), os.FileMode(mode)))
+	return fuse.ToStatus(syscall.Mkdir(fs.absPath(path), mode))
 }
 
 func (fs *testFileSystem) Unlink(ctx *Context, path string) (code fuse.Status) {
@@ -75,14 +72,11 @@ func (fs *testFileSystem) Rmdir(ctx *Context, path string) (code fuse.Status) {
 }
 
 func (fs *testFileSystem) Rename(ctx *Context, path string, newPath string) fuse.Status {
-	path = fs.absPath(path)
-	newPath = fs.absPath(newPath)
-	err := os.Rename(path, newPath)
-	return fuse.ToStatus(err)
+	return fuse.ToStatus(syscall.Rename(fs.absPath(path), fs.absPath(newPath)))
 }
 
 func (fs *testFileSystem) Link(ctx *Context, path string, newPath string) fuse.Status {
-	return fuse.ToStatus(os.Link(fs.absPath(path), fs.absPath(newPath)))
+	return fuse.ToStatus(syscall.Link(fs.absPath(path), fs.absPath(newPath)))
 }
 
 func (fs *testFileSystem) Symlink(ctx *Context, path string, target string) fuse.Status {
@@ -95,9 +89,12 @@ func (fs *testFileSystem) Readlink(ctx *Context, path string) (target string, co
 }
 
 func (fs *testFileSystem) Create(ctx *Context, path string, flags uint32, mode uint32) (uFh uint32, forceDIO bool, code fuse.Status) {
+	flags = flags &^ syscall.O_APPEND
 	fd, err := syscall.Open(fs.absPath(path), int(flags)|os.O_CREATE, mode)
 	if err != nil {
-		return 0, false, fuse.ToStatus(err)
+		syscall.Close(fd)
+		code = fuse.ToStatus(err)
+		return
 	}
 	uFh = uint32(fd)
 	return
@@ -105,7 +102,9 @@ func (fs *testFileSystem) Create(ctx *Context, path string, flags uint32, mode u
 
 func (fs *testFileSystem) Open(ctx *Context, path string, flags uint32) (uFh uint32, keepCache, forceDIO bool, code fuse.Status) {
 	fd, err := syscall.Open(fs.absPath(path), int(flags), 0)
+	forceDIO = true
 	if err != nil {
+		syscall.Close(fd)
 		code = fuse.ToStatus(err)
 		return
 	}
@@ -115,43 +114,46 @@ func (fs *testFileSystem) Open(ctx *Context, path string, flags uint32) (uFh uin
 
 func (fs *testFileSystem) Read(ctx *Context, path string, uFh uint32, dest []byte, off uint64) (result fuse.ReadResult, code fuse.Status) {
 	var err error
-	if uFh > 3 {
-		_, err = syscall.Pread(int(uFh), dest, int64(off))
-	} else {
-		f, err := os.Open(fs.absPath(path))
-		defer f.Close()
+	var sz int
+	var fd int
+
+	if uFh == 0 {
+		fd, err = syscall.Open(fs.absPath(path), syscall.O_RDONLY, 0)
+		defer syscall.Close(fd)
 		if err != nil {
 			return nil, fuse.ToStatus(err)
 		}
-		_, err = f.ReadAt(dest, int64(off))
+	} else {
+		fd = int(uFh)
 	}
 
-	if err != nil && err != io.EOF {
-		return nil, fuse.ToStatus(err)
-	}
+	sz, err = syscall.Pread(fd, dest, int64(off))
 
-	return fuse.ReadResultData(dest), fuse.OK
+	return fuse.ReadResultData(dest[:sz]), fuse.ToStatus(err)
 }
 
 func (fs *testFileSystem) Write(ctx *Context, path string, uFh uint32, data []byte, off uint64) (written uint32, code fuse.Status) {
 	var err error
-	var n int
-	if uFh > 3 {
-		n, err = syscall.Pwrite(int(uFh), data, int64(off))
-	} else {
-		f, e := os.Open(fs.absPath(path))
-		defer f.Close()
-		if e != nil {
-			return 0, fuse.ToStatus(e)
+	var sz int
+	var fd int
+
+	if uFh == 0 {
+		fd, err = syscall.Open(fs.absPath(path), syscall.O_RDONLY, 0)
+		defer syscall.Close(fd)
+		if err != nil {
+			return 0, fuse.ToStatus(err)
 		}
-		n, err = f.WriteAt(data, int64(off))
+	} else {
+		fd = int(uFh)
 	}
 
-	return uint32(n), fuse.ToStatus(err)
+	sz, err = syscall.Pwrite(fd, data, int64(off))
+
+	return uint32(sz), fuse.ToStatus(err)
 }
 
 func (fs *testFileSystem) Fsync(ctx *Context, path string, uFh uint32, flags uint32) fuse.Status {
-	if uFh > 3 {
+	if uFh != 0 {
 		return fuse.ToStatus(syscall.Fsync(int(uFh)))
 	} else {
 		return fuse.OK
@@ -159,14 +161,14 @@ func (fs *testFileSystem) Fsync(ctx *Context, path string, uFh uint32, flags uin
 }
 
 func (fs *testFileSystem) Release(ctx *Context, path string, uFh uint32) {
-	if uFh > 3 {
-		fuse.ToStatus(syscall.Close(int(uFh)))
+	if uFh != 0 {
+		syscall.Close(int(uFh))
 	}
 }
 
 func (fs *testFileSystem) Chmod(ctx *Context, path string, uFh uint32, mode uint32) fuse.Status {
 	var err error
-	if uFh > 3 {
+	if uFh != 0 {
 		err = syscall.Fchmod(int(uFh), mode)
 	} else {
 		err = syscall.Chmod(fs.absPath(path), mode)
@@ -181,7 +183,7 @@ func (fs *testFileSystem) Chown(ctx *Context, path string, uFh uint32, uid uint3
 
 func (fs *testFileSystem) Truncate(ctx *Context, path string, uFh uint32, size uint64) fuse.Status {
 	var err error
-	if uFh > 3 {
+	if uFh != 0 {
 		err = syscall.Ftruncate(int(uFh), int64(size))
 	} else {
 		err = os.Truncate(fs.absPath(path), int64(size))
@@ -195,8 +197,8 @@ func (fs *testFileSystem) Lsdir(ctx *Context, path string) (stream []fuse.DirEnt
 	if err != nil {
 		return nil, fuse.ToStatus(err)
 	}
-	batch := 512
-	stream = make([]fuse.DirEntry, 0)
+	batch := 256
+	stream = make([]fuse.DirEntry, 0, batch)
 	for {
 		infos, err := f.Readdir(batch)
 		for i := range infos {
@@ -207,8 +209,6 @@ func (fs *testFileSystem) Lsdir(ctx *Context, path string) (stream []fuse.DirEnt
 			if s := fuse.ToStatT(infos[i]); s != nil {
 				d.Mode = uint32(s.Mode)
 				d.Ino = s.Ino
-			} else {
-				log.Printf("ReadDir entry %q for %q has no stat info", name, path)
 			}
 			stream = append(stream, d)
 		}
@@ -220,7 +220,7 @@ func (fs *testFileSystem) Lsdir(ctx *Context, path string) (stream []fuse.DirEnt
 			break
 		}
 	}
-	return stream, fuse.OK
+	return
 }
 
 func (fs *testFileSystem) StatFs(ctx *Context, path string, out *fuse.StatfsOut) fuse.Status {
@@ -229,22 +229,19 @@ func (fs *testFileSystem) StatFs(ctx *Context, path string, out *fuse.StatfsOut)
 	if err != nil {
 		return fuse.ToStatus(err)
 	}
-	out = &fuse.StatfsOut{}
 	out.FromStatfsT(&s)
 	return fuse.OK
 }
 
 func (fs *testFileSystem) Utimens(ctx *Context, path string, uFh uint32, atime *time.Time, mtime *time.Time) fuse.Status {
 	var err error
-	if uFh > 3 {
+	if uFh != 0 {
 		err = fUtimes(int(uFh), atime, mtime)
 	} else {
 		err = utimes(fs.absPath(path), atime, mtime)
 	}
 	return fuse.ToStatus(err)
 }
-
-//
 
 func (fs *testFileSystem) SetXAttr(ctx *Context, path string, attr string, data []byte, flags uint32) fuse.Status {
 	var m map[string][]byte

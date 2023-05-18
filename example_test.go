@@ -2,6 +2,7 @@ package pathfs
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"os"
@@ -33,9 +34,7 @@ func setupTest() (mountPoint string, svr *fuse.Server) {
 		panic(err)
 	}
 
-	server, err := Mount(mountPoint, NewTestFileSystem(nativeRoot), nil, &fuse.MountOptions{
-		SingleThreaded: true,
-	})
+	server, err := Mount(mountPoint, NewTestFileSystem(nativeRoot), nil, nil)
 	if err != nil {
 		server.Unmount()
 		panic(err)
@@ -44,12 +43,8 @@ func setupTest() (mountPoint string, svr *fuse.Server) {
 }
 
 func assertError(err error, expectedErr error) {
-	if err != expectedErr {
-		msg := "nil"
-		if expectedErr != nil {
-			msg = expectedErr.Error()
-		}
-		panic(fmt.Sprintf("error should be %s, not %s", msg, err))
+	if !errors.Is(err, expectedErr) {
+		panic(fmt.Sprintf("error should be %s, not %s", expectedErr, err))
 	}
 }
 
@@ -141,8 +136,10 @@ func Example_dir() {
 	printDir(subDirPath)
 
 	// remove subDirPath
-	err = os.RemoveAll(subFilePath)
+	err = os.RemoveAll(subDirPath)
 	assertError(err, nil)
+	err = syscall.Stat(subDirPath, &st)
+	assertError(err, syscall.ENOENT)
 
 	// Output:
 	// test_dir
@@ -238,7 +235,7 @@ func TestAttr(t *testing.T) {
 	err = setXAttr(path, testAttr, []byte(testAttrData), 0)
 	assertError(err, nil)
 
-	attr, err := getXAttr(path, "testattr")
+	attr, err := getXAttr(path, testAttr)
 	assertError(err, nil)
 	if string(attr) != testAttrData {
 		t.Errorf("want: xattr %s, have: %s", testAttrData, string(attr))
@@ -256,8 +253,12 @@ func TestAttr(t *testing.T) {
 	err = removeXAttr(path, testAttr)
 	assertError(err, nil)
 	attrs, err = listXAttr(path)
+	assertError(err, syscall.ENODATA)
 	if len(attrs) != 0 {
 		t.Errorf("want: xattr count %d, have: %d", 0, len(attrs))
 	}
+
+	attr, err = getXAttr(path, testAttr)
+	assertError(err, syscall.ENODATA)
 
 }
