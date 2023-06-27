@@ -93,7 +93,10 @@ func (b *rawBridge) String() string {
 }
 
 func (b *rawBridge) NodeCount() int {
-	return len(b.nodes)
+	b.mu.Lock()
+	n := len(b.nodes)
+	b.mu.Unlock()
+	return n
 }
 
 func (b *rawBridge) SetDebug(debug bool) {}
