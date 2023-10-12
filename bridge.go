@@ -523,7 +523,7 @@ func (b *rawBridge) Flush(cancel <-chan struct{}, input *fuse.FlushIn) fuse.Stat
 	n, f := b.inodeAndFile(input.NodeId, uint32(input.Fh), ctx)
 	path := b.fpathOf(n, f)
 
-	return b.fs.Flush(ctx, path, f.uFh)
+	return b.fs.Flush(ctx, path, f.uFh, input.LockOwner)
 }
 
 func (b *rawBridge) Release(cancel <-chan struct{}, input *fuse.ReleaseIn) {

@@ -53,7 +53,7 @@ type FileSystem interface {
 	Write(ctx *Context, path string, uFh uint32, data []byte, off uint64) (written uint32, code fuse.Status)
 	Fallocate(ctx *Context, path string, uFh uint32, off uint64, size uint64, mode uint32) fuse.Status
 	Fsync(ctx *Context, path string, uFh uint32, flags uint32) fuse.Status
-	Flush(ctx *Context, path string, uFh uint32) fuse.Status
+	Flush(ctx *Context, path string, uFh uint32, lockOwner uint64) fuse.Status
 	Release(ctx *Context, path string, uFh uint32)
 
 	GetLk(ctx *Context, path string, uFh uint32, owner uint64, lk *fuse.FileLock, flags uint32, out *fuse.FileLock) fuse.Status
