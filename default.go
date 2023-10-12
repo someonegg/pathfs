@@ -89,7 +89,7 @@ func (fs defaultFileSystem) Fallocate(ctx *Context, path string, uFh uint32, off
 func (fs defaultFileSystem) Fsync(ctx *Context, path string, uFh uint32, flags uint32) fuse.Status {
 	return fuse.ENOSYS
 }
-func (fs defaultFileSystem) Flush(ctx *Context, path string, uFh uint32) fuse.Status {
+func (fs defaultFileSystem) Flush(ctx *Context, path string, uFh uint32, lockOwner uint64) fuse.Status {
 	return fuse.ENOSYS
 }
 func (fs defaultFileSystem) Release(ctx *Context, path string, uFh uint32) {}
