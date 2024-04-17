@@ -70,6 +70,13 @@ func (b *rawBridge) inode(ino uint64) *inode {
 	return n
 }
 
+func (b *rawBridge) inodeSafe(ino uint64) *inode {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.nodes[ino]
+}
+
 func (b *rawBridge) inodeAndFile(ino uint64, fh uint32, ctx *Context) (*inode, *fileEntry) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -143,7 +150,10 @@ func (b *rawBridge) lookup(ctx *Context, path string, parent *inode, name string
 }
 
 func (b *rawBridge) Forget(nodeid, nlookup uint64) {
-	n := b.inode(nodeid)
+	n := b.inodeSafe(nodeid)
+	if n == nil {
+		return
+	}
 
 	removed := b.removeRef(n, uint32(nlookup))
 	if removed {
