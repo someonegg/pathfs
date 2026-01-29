@@ -36,7 +36,6 @@ func setupTest() (mountPoint string, svr *fuse.Server) {
 
 	server, err := Mount(mountPoint, NewTestFileSystem(nativeRoot), nil, nil)
 	if err != nil {
-		server.Unmount()
 		panic(err)
 	}
 	return mountPoint, server
