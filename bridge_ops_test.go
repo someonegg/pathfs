@@ -21,6 +21,8 @@ type mockFileSystem struct {
 	// Create behavior control
 	createFunc func(path string) (uint32, bool, fuse.Status)
 
+	releaseFunc func(ctx *Context, path string, uFh uint32)
+
 	// Open behavior control
 	openFunc func(path string) (uint32, bool, bool, fuse.Status)
 }
@@ -56,7 +58,9 @@ func (m *mockFileSystem) Open(ctx *Context, path string, flags uint32) (uint32, 
 }
 
 func (m *mockFileSystem) Release(ctx *Context, path string, uFh uint32) {
-	// no-op for mock
+	if m.releaseFunc != nil {
+		m.releaseFunc(ctx, path, uFh)
+	}
 }
 
 // newMockBridge creates a rawBridge with mock FileSystem for testing
@@ -101,7 +105,7 @@ func TestLookup(t *testing.T) {
 	// Verify child was added
 	child := b.root.children["testfile"]
 	if child == nil {
-		t.Error("child should be added to parent")
+		t.Fatal("child should be added to parent")
 	}
 	if child.ino != 100 {
 		t.Errorf("child ino should be 100, got %d", child.ino)
@@ -136,6 +140,9 @@ func TestLookupWithNegativeTimeout(t *testing.T) {
 	status := b.Lookup(nil, header, "nonexistent", out)
 	if status != fuse.ENOENT {
 		t.Errorf("expected ENOENT, got %v", status)
+	}
+	if out.EntryTimeout() != negTimeout {
+		t.Errorf("negative timeout = %v", out.EntryTimeout())
 	}
 }
 
@@ -200,7 +207,7 @@ func TestInodeSafe(t *testing.T) {
 	// Test existing node
 	node := b.inodeSafe(1)
 	if node == nil {
-		t.Error("root node should exist")
+		t.Fatal("root node should exist")
 	}
 	if node.ino != 1 {
 		t.Errorf("expected ino 1, got %d", node.ino)
@@ -243,8 +250,7 @@ func TestCompactMemory(t *testing.T) {
 
 	// After compactMemory, nodeCountHigh should be reduced
 	if b.nodeCountHigh >= initialHigh {
-		// compactMemory only triggers when nodeCountHigh > len(nodes)*100
-		// This is expected behavior - compactMemory won't trigger for small counts
+		t.Errorf("compaction did not lower high water mark: %d", b.nodeCountHigh)
 	}
 
 	// Verify only root remains
@@ -511,5 +517,87 @@ func TestConcurrentLookup(t *testing.T) {
 	}
 	if node.lookupCount != 10 {
 		t.Errorf("expected lookupCount 10, got %d", node.lookupCount)
+	}
+}
+
+type flushRecorder struct {
+	FileSystem
+	called bool
+	t      *testing.T
+}
+
+func (fs *flushRecorder) Flush(ctx *Context, path string, fh uint32, owner uint64) fuse.Status {
+	fs.called = true
+	if path != "opened" || fh != 42 || owner != 0x123456789abcdef0 || ctx.Opener == nil || ctx.Opener.Uid != 12 || ctx.Caller.Uid != 34 {
+		fs.t.Errorf("incorrect Flush arguments: %q %d %x %+v", path, fh, owner, ctx)
+	}
+	return fuse.EIO
+}
+func TestFlushForwarding(t *testing.T) {
+	fs := &flushRecorder{FileSystem: DefaultFileSystem(), t: t}
+	b := NewPathFS(fs, nil).(*rawBridge)
+	b.addChild(b.root, "renamed", 2, false)
+	fh := b.registerFile(fuse.Owner{Uid: 12}, "opened", 42, nil)
+	code := b.Flush(nil, &fuse.FlushIn{InHeader: fuse.InHeader{NodeId: 2, Caller: fuse.Caller{Owner: fuse.Owner{Uid: 34}}}, Fh: uint64(fh), LockOwner: 0x123456789abcdef0})
+	if !fs.called || code != fuse.EIO {
+		t.Fatalf("Flush: called=%v status=%v", fs.called, code)
+	}
+}
+
+// A successful backend create transfers ownership of the handle to the bridge,
+// even when the following lookup fails before a kernel handle is registered.
+func TestCreateHandleOwnership(t *testing.T) {
+	tests := []struct {
+		name                     string
+		handle                   uint32
+		createStatus, attrStatus fuse.Status
+		releases                 int
+	}{
+		{"create fails", 0, fuse.EACCES, fuse.OK, 0},
+		{"lookup fails", 42, fuse.OK, fuse.EIO, 1},
+		{"lookup fails without handle", 0, fuse.OK, fuse.ENOENT, 1},
+		{"success", 42, fuse.OK, fuse.OK, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			releases := 0
+			caller := fuse.Caller{Owner: fuse.Owner{Uid: 12, Gid: 34}}
+			fs := &mockFileSystem{
+				createFunc: func(path string) (uint32, bool, fuse.Status) { return tt.handle, false, tt.createStatus },
+				getAttrFunc: func(path string) (fuse.Attr, fuse.Status) {
+					return fuse.Attr{Ino: 3, Mode: fuse.S_IFREG | 0600}, tt.attrStatus
+				},
+				releaseFunc: func(ctx *Context, path string, handle uint32) {
+					releases++
+					if path != "dir/file" || handle != tt.handle || ctx.Caller != caller || ctx.Opener == nil || *ctx.Opener != caller.Owner {
+						t.Errorf("incorrect cleanup: path=%q handle=%d context=%+v", path, handle, ctx)
+					}
+				},
+			}
+			b := newMockBridge(fs)
+			b.addChild(b.root, "dir", 2, true)
+			out := &fuse.CreateOut{}
+			code := b.Create(nil, &fuse.CreateIn{InHeader: fuse.InHeader{NodeId: 2, Caller: caller}}, "file", out)
+			want := tt.createStatus
+			if want == fuse.OK {
+				want = tt.attrStatus
+			}
+			if code != want {
+				t.Fatalf("status = %v, want %v", code, want)
+			}
+			if releases != tt.releases {
+				t.Errorf("Release called %d times, want %d", releases, tt.releases)
+			}
+			if code != fuse.OK {
+				if len(b.files) != 1 || out.Fh != 0 || b.inodeSafe(3) != nil {
+					t.Error("failed Create registered a file handle or inode")
+				}
+			} else {
+				b.Release(nil, &fuse.ReleaseIn{InHeader: fuse.InHeader{NodeId: 3, Caller: caller}, Fh: out.Fh})
+				if releases != 1 {
+					t.Errorf("successful Create released %d times", releases)
+				}
+			}
+		})
 	}
 }

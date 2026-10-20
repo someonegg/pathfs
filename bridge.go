@@ -456,6 +456,9 @@ func (b *rawBridge) Create(cancel <-chan struct{}, input *fuse.CreateIn, name st
 	}
 	code = b.lookup(ctx, path, parent, name, &out.EntryOut)
 	if !code.Ok() {
+		// No kernel handle will be returned, so Release cannot arrive later.
+		ctx.Opener = &input.Caller.Owner
+		b.fs.Release(ctx, path, uFh)
 		return code
 	}
 	if forceDIO {
@@ -709,14 +712,14 @@ func (b *rawBridge) Dump() (data *DumpRawBridge, iterator InodeIterator, err err
 			Opener: f.opener,
 			Path:   f.path,
 			UFh:    f.uFh,
-			Stream: f.stream,
+			Stream: append([]fuse.DirEntry(nil), f.stream...),
 		}
 	}
 
 	data = &DumpRawBridge{
 		NodeCount: b.NodeCount(),
 		Files:     files,
-		FreeFiles: b.freeFiles,
+		FreeFiles: append([]uint32(nil), b.freeFiles...),
 	}
 
 	inodeIterator := NewInodeDumper(b.nodes)
@@ -733,14 +736,15 @@ func (b *rawBridge) Restore(data *DumpRawBridge) (filler InodeFiller, err error)
 			opener: v.Opener,
 			path:   v.Path,
 			uFh:    v.UFh,
-			stream: v.Stream,
+			stream: append([]fuse.DirEntry(nil), v.Stream...),
 		}
 	}
 	b.files = files
-	b.freeFiles = data.FreeFiles
+	b.freeFiles = append([]uint32(nil), data.FreeFiles...)
 
 	return &InodeRestorer{
 		bridge:    b,
 		nodeCount: data.NodeCount,
+		seen:      make(map[uint64]bool),
 	}, nil
 }

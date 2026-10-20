@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -13,14 +14,16 @@ type testFileSystem struct {
 	defaultFileSystem
 	root string
 
-	xattrs map[string]map[string][]byte
+	xattrMu sync.Mutex
+	xattrs  map[string]map[string][]byte
 }
 
-// NewTestFileSystem construct A FileSystem
-// that forward most of the requests to native filesystem
-// and process Extended attributes requests in case of some filesystems that don't support xattr operations
+// NewTestFileSystem forwards most operations to an existing absolute root path.
+// It is a test backend, not a sandbox or a full POSIX loopback filesystem.
+// Extended attributes are simulated in memory by path, ignore flags, and do not
+// follow renames or hard links. Invalid root paths cause a panic.
 func NewTestFileSystem(root string) FileSystem {
-	if root[0] != '/' {
+	if !filepath.IsAbs(root) {
 		panic("not a absolute path")
 	}
 
@@ -42,7 +45,12 @@ func (fs *testFileSystem) absPath(relPath string) string {
 
 func (fs *testFileSystem) GetAttr(ctx *Context, path string, uFh uint32, out *fuse.Attr) fuse.Status {
 	st := syscall.Stat_t{}
-	err := syscall.Lstat(fs.absPath(path), &st)
+	var err error
+	if uFh != 0 {
+		err = syscall.Fstat(int(uFh), &st)
+	} else {
+		err = syscall.Lstat(fs.absPath(path), &st)
+	}
 	if err != nil {
 		return fuse.ToStatus(err)
 	}
@@ -92,7 +100,6 @@ func (fs *testFileSystem) Create(ctx *Context, path string, flags uint32, mode u
 	flags = flags &^ syscall.O_APPEND
 	fd, err := syscall.Open(fs.absPath(path), int(flags)|os.O_CREATE, mode)
 	if err != nil {
-		syscall.Close(fd)
 		code = fuse.ToStatus(err)
 		return
 	}
@@ -104,7 +111,6 @@ func (fs *testFileSystem) Open(ctx *Context, path string, flags uint32) (uFh uin
 	fd, err := syscall.Open(fs.absPath(path), int(flags), 0)
 	forceDIO = true
 	if err != nil {
-		syscall.Close(fd)
 		code = fuse.ToStatus(err)
 		return
 	}
@@ -119,17 +125,20 @@ func (fs *testFileSystem) Read(ctx *Context, path string, uFh uint32, dest []byt
 
 	if uFh == 0 {
 		fd, err = syscall.Open(fs.absPath(path), syscall.O_RDONLY, 0)
-		defer syscall.Close(fd)
 		if err != nil {
 			return nil, fuse.ToStatus(err)
 		}
+		defer syscall.Close(fd)
 	} else {
 		fd = int(uFh)
 	}
 
 	sz, err = syscall.Pread(fd, dest, int64(off))
 
-	return fuse.ReadResultData(dest[:sz]), fuse.ToStatus(err)
+	if err != nil {
+		return nil, fuse.ToStatus(err)
+	}
+	return fuse.ReadResultData(dest[:sz]), fuse.OK
 }
 
 func (fs *testFileSystem) Write(ctx *Context, path string, uFh uint32, data []byte, off uint64) (written uint32, code fuse.Status) {
@@ -138,18 +147,21 @@ func (fs *testFileSystem) Write(ctx *Context, path string, uFh uint32, data []by
 	var fd int
 
 	if uFh == 0 {
-		fd, err = syscall.Open(fs.absPath(path), syscall.O_RDONLY, 0)
-		defer syscall.Close(fd)
+		fd, err = syscall.Open(fs.absPath(path), syscall.O_WRONLY, 0)
 		if err != nil {
 			return 0, fuse.ToStatus(err)
 		}
+		defer syscall.Close(fd)
 	} else {
 		fd = int(uFh)
 	}
 
 	sz, err = syscall.Pwrite(fd, data, int64(off))
 
-	return uint32(sz), fuse.ToStatus(err)
+	if err != nil {
+		return 0, fuse.ToStatus(err)
+	}
+	return uint32(sz), fuse.OK
 }
 
 func (fs *testFileSystem) Fsync(ctx *Context, path string, uFh uint32, flags uint32) fuse.Status {
@@ -193,10 +205,10 @@ func (fs *testFileSystem) Truncate(ctx *Context, path string, uFh uint32, size u
 
 func (fs *testFileSystem) Lsdir(ctx *Context, path string) (stream []fuse.DirEntry, code fuse.Status) {
 	f, err := os.Open(fs.absPath(path))
-	defer f.Close()
 	if err != nil {
 		return nil, fuse.ToStatus(err)
 	}
+	defer f.Close()
 	batch := 256
 	stream = make([]fuse.DirEntry, 0, batch)
 	for {
@@ -212,7 +224,7 @@ func (fs *testFileSystem) Lsdir(ctx *Context, path string) (stream []fuse.DirEnt
 			}
 			stream = append(stream, d)
 		}
-		if len(infos) < batch || err == io.EOF {
+		if err == io.EOF {
 			break
 		}
 		if err != nil {
@@ -244,17 +256,21 @@ func (fs *testFileSystem) Utimens(ctx *Context, path string, uFh uint32, atime *
 }
 
 func (fs *testFileSystem) SetXAttr(ctx *Context, path string, attr string, data []byte, flags uint32) fuse.Status {
+	fs.xattrMu.Lock()
+	defer fs.xattrMu.Unlock()
 	var m map[string][]byte
 	var ok bool
 	if m, ok = fs.xattrs[path]; !ok {
 		m = make(map[string][]byte)
 		fs.xattrs[path] = m
 	}
-	m[attr] = data
+	m[attr] = append([]byte(nil), data...)
 	return fuse.OK
 }
 
 func (fs *testFileSystem) GetXAttr(ctx *Context, path string, attr string) (data []byte, code fuse.Status) {
+	fs.xattrMu.Lock()
+	defer fs.xattrMu.Unlock()
 	var m map[string][]byte
 	var ok bool
 	if m, ok = fs.xattrs[path]; !ok {
@@ -263,10 +279,12 @@ func (fs *testFileSystem) GetXAttr(ctx *Context, path string, attr string) (data
 	if data, ok = m[attr]; !ok {
 		return nil, fuse.ENODATA
 	}
-	return data, fuse.OK
+	return append([]byte(nil), data...), fuse.OK
 }
 
 func (fs *testFileSystem) ListXAttr(ctx *Context, path string) (attrs []string, code fuse.Status) {
+	fs.xattrMu.Lock()
+	defer fs.xattrMu.Unlock()
 	var m map[string][]byte
 	var ok bool
 	if m, ok = fs.xattrs[path]; !ok {
@@ -279,9 +297,14 @@ func (fs *testFileSystem) ListXAttr(ctx *Context, path string) (attrs []string, 
 }
 
 func (fs *testFileSystem) RemoveXAttr(ctx *Context, path string, attr string) fuse.Status {
+	fs.xattrMu.Lock()
+	defer fs.xattrMu.Unlock()
 	var m map[string][]byte
 	var ok bool
 	if m, ok = fs.xattrs[path]; !ok {
+		return fuse.ENODATA
+	}
+	if _, ok := m[attr]; !ok {
 		return fuse.ENODATA
 	}
 	delete(m, attr)

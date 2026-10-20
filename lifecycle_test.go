@@ -1,7 +1,11 @@
+//go:build integration
+// +build integration
+
 package pathfs
 
 import (
 	"bytes"
+	"io/ioutil"
 	"os"
 	fp "path/filepath"
 	"syscall"
@@ -10,8 +14,8 @@ import (
 
 // TestFileLifecycle tests the complete file operation flow
 func TestFileLifecycle(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	filePath := fp.Join(mountPoint, "lifecycle_test_file")
 	testData := []byte("Hello, PathFS! This is a lifecycle test.")
@@ -64,16 +68,17 @@ func TestFileLifecycle(t *testing.T) {
 
 // TestMultipleOpenSameFile tests opening the same file multiple times
 func TestMultipleOpenSameFile(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	filePath := fp.Join(mountPoint, "multi_open_file")
 
 	// Create the file
-	file1, err := os.Create(filePath)
+	file1, err := os.OpenFile(filePath, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatalf("failed to create file: %v", err)
 	}
+	defer file1.Close()
 
 	// Write some data
 	_, err = file1.WriteString("initial content")
@@ -86,6 +91,7 @@ func TestMultipleOpenSameFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open file second time: %v", err)
 	}
+	defer file2.Close()
 
 	// Write through second handle
 	_, err = file2.WriteAt([]byte("MODIFIED"), 0)
@@ -110,14 +116,12 @@ func TestMultipleOpenSameFile(t *testing.T) {
 		t.Errorf("expected to see MODIFIED, got %q", buf[:n])
 	}
 
-	file1.Close()
-	file2.Close()
 }
 
 // TestFsyncFile tests the Fsync operation
 func TestFsyncFile(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	filePath := fp.Join(mountPoint, "fsync_test_file")
 
@@ -151,8 +155,8 @@ func TestFsyncFile(t *testing.T) {
 
 // TestMknodRegularFile tests creating a regular file with Mknod
 func TestMknodRegularFile(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	filePath := fp.Join(mountPoint, "mknod_regular_file")
 
@@ -177,8 +181,8 @@ func TestMknodRegularFile(t *testing.T) {
 
 // TestMknodFIFO tests creating a FIFO with Mknod
 func TestMknodFIFO(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	fifoPath := fp.Join(mountPoint, "mknod_fifo")
 
@@ -203,8 +207,8 @@ func TestMknodFIFO(t *testing.T) {
 
 // TestReadlinkDirect tests reading symlink target
 func TestReadlinkDirect(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	// Create a regular file first
 	targetPath := fp.Join(mountPoint, "symlink_target")
@@ -234,8 +238,8 @@ func TestReadlinkDirect(t *testing.T) {
 
 // TestSymlinkToRelativePath tests symlink with relative path
 func TestSymlinkToRelativePath(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	// Create a subdirectory
 	subDir := fp.Join(mountPoint, "subdir")
@@ -270,7 +274,7 @@ func TestSymlinkToRelativePath(t *testing.T) {
 	}
 
 	// Verify we can read through the symlink
-	content, err := os.ReadFile(linkPath)
+	content, err := ioutil.ReadFile(linkPath)
 	if err != nil {
 		t.Fatalf("failed to read through symlink: %v", err)
 	}
@@ -281,8 +285,8 @@ func TestSymlinkToRelativePath(t *testing.T) {
 
 // TestFileLock tests file locking operations (expected to return ENOSYS for testFileSystem)
 func TestFileLock(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	filePath := fp.Join(mountPoint, "lock_test_file")
 
@@ -307,14 +311,14 @@ func TestFileLock(t *testing.T) {
 	// We expect this to fail with ENOSYS or succeed depending on the FS implementation
 	// The test mainly verifies the code path doesn't panic
 	if err != nil && err != syscall.ENOSYS && err != syscall.ENOLCK {
-		t.Logf("FcntlFlock returned: %v (this may be expected)", err)
+		t.Fatalf("unexpected FcntlFlock error: %v", err)
 	}
 }
 
 // TestStatFs tests the StatFs operation
 func TestStatFs(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	var statfs syscall.Statfs_t
 	err := syscall.Statfs(mountPoint, &statfs)
@@ -333,8 +337,8 @@ func TestStatFs(t *testing.T) {
 
 // TestAccessCheck tests the Access operation
 func TestAccessCheck(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	// Access mode constants (portable)
 	const (
@@ -367,7 +371,7 @@ func TestAccessCheck(t *testing.T) {
 	// Check execute access (should fail for regular file without x permission)
 	err = syscall.Access(filePath, X_OK)
 	if err == nil {
-		t.Log("execute access unexpectedly succeeded (may depend on file permissions)")
+		t.Error("execute access succeeded for a file without execute permission")
 	}
 
 	// Check access on non-existent file
@@ -379,13 +383,13 @@ func TestAccessCheck(t *testing.T) {
 
 // TestTruncateFile tests file truncation
 func TestTruncateFile(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	filePath := fp.Join(mountPoint, "truncate_test_file")
 
 	// Create file with content
-	err := os.WriteFile(filePath, []byte("0123456789"), 0644)
+	err := ioutil.WriteFile(filePath, []byte("0123456789"), 0644)
 	if err != nil {
 		t.Fatalf("failed to create file: %v", err)
 	}
@@ -406,7 +410,7 @@ func TestTruncateFile(t *testing.T) {
 	}
 
 	// Verify content
-	content, err := os.ReadFile(filePath)
+	content, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("failed to read: %v", err)
 	}
@@ -431,8 +435,8 @@ func TestTruncateFile(t *testing.T) {
 
 // TestFtruncate tests file truncation via file descriptor
 func TestFtruncate(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	filePath := fp.Join(mountPoint, "ftruncate_test_file")
 
@@ -467,14 +471,14 @@ func TestFtruncate(t *testing.T) {
 
 // TestRenameFile tests file rename operation
 func TestRenameFile(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	oldPath := fp.Join(mountPoint, "old_name")
 	newPath := fp.Join(mountPoint, "new_name")
 
 	// Create file
-	err := os.WriteFile(oldPath, []byte("content"), 0644)
+	err := ioutil.WriteFile(oldPath, []byte("content"), 0644)
 	if err != nil {
 		t.Fatalf("failed to create file: %v", err)
 	}
@@ -492,7 +496,7 @@ func TestRenameFile(t *testing.T) {
 	}
 
 	// Verify new path exists with correct content
-	content, err := os.ReadFile(newPath)
+	content, err := ioutil.ReadFile(newPath)
 	if err != nil {
 		t.Fatalf("failed to read renamed file: %v", err)
 	}
@@ -503,8 +507,8 @@ func TestRenameFile(t *testing.T) {
 
 // TestRenameDirectory tests directory rename operation
 func TestRenameDirectory(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	oldDir := fp.Join(mountPoint, "old_dir")
 	newDir := fp.Join(mountPoint, "new_dir")
@@ -515,7 +519,7 @@ func TestRenameDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create dir: %v", err)
 	}
-	err = os.WriteFile(fp.Join(oldDir, fileInDir), []byte("data"), 0644)
+	err = ioutil.WriteFile(fp.Join(oldDir, fileInDir), []byte("data"), 0644)
 	if err != nil {
 		t.Fatalf("failed to create file in dir: %v", err)
 	}
@@ -533,7 +537,7 @@ func TestRenameDirectory(t *testing.T) {
 	}
 
 	// Verify file inside new dir exists
-	content, err := os.ReadFile(fp.Join(newDir, fileInDir))
+	content, err := ioutil.ReadFile(fp.Join(newDir, fileInDir))
 	if err != nil {
 		t.Fatalf("failed to read file in renamed dir: %v", err)
 	}

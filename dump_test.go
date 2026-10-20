@@ -1,6 +1,9 @@
 package pathfs
 
 import (
+	"github.com/hanwen/go-fuse/v2/fuse"
+	"io"
+	"reflect"
 	"testing"
 )
 
@@ -128,5 +131,130 @@ func TestDump(t *testing.T) {
 	if t.Failed() {
 		printDirTree(senderBridge.root)
 		printDirTree(receiverBridge.root)
+	}
+}
+
+func TestDumpSnapshotIsolation(t *testing.T) {
+	b := newTestBridge()
+	n := b.addChild(b.root, "old", 2, false)
+	fh := b.registerFile(fuse.Owner{Uid: 12}, "old", 42, []fuse.DirEntry{{Name: "original"}})
+	free := b.registerFile(fuse.Owner{}, "free", 0, nil)
+	b.unregisterFile(free)
+	data, iter, err := b.Dump()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.files[fh].stream[0].Name = "changed"
+	b.freeFiles[0] = 99
+	b.addChild(b.root, "new", n.ino, false)
+	if data.Files[fh].Stream[0].Name != "original" || data.FreeFiles[0] != free {
+		t.Error("dump shares mutable file state with source")
+	}
+	for {
+		entry, err := iter.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if entry.Ino == n.ino && (entry.LookupCount != 1 || len(entry.Parents) != 1 || entry.Parents[0].Name != "old") {
+			t.Errorf("inode changed after Dump: %+v", entry)
+		}
+	}
+}
+
+func TestRestoreContinuedUse(t *testing.T) {
+	source := newTestBridge()
+	n := source.addChild(source.root, "first", 2, false)
+	source.addChild(source.root, "latest", 2, false)
+	source.addChild(source.root, "empty", 3, true)
+	orphan := source.addChild(source.root, "orphan", 4, true)
+	source.rmChild(source.root, "orphan")
+	fh := source.registerFile(fuse.Owner{Uid: 12}, "first", 42, []fuse.DirEntry{{Name: "entry"}})
+	free := source.registerFile(fuse.Owner{}, "free", 0, nil)
+	source.unregisterFile(free)
+	data, iter, err := source.Dump()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest := newTestBridge()
+	filler, err := dest.Restore(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		entry, err := iter.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := filler.AddInode(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := filler.Finished(); err != nil {
+		t.Fatal(err)
+	}
+	if dest.pathOf(dest.inode(n.ino)) != "latest" {
+		t.Fatal("lost preferred hard link")
+	}
+	dest.rmChild(dest.root, "latest")
+	if dest.pathOf(dest.inode(n.ino)) != "first" {
+		t.Fatal("lost hard link fallback")
+	}
+	if !dest.inode(3).isDir() || !dest.inode(orphan.ino).isDir() {
+		t.Fatal("lost empty/orphan directory type")
+	}
+	if !reflect.DeepEqual(dest.files[fh], source.files[fh]) {
+		t.Fatal("lost file state")
+	}
+	dest.files[fh].stream[0].Name = "changed"
+	if data.Files[fh].Stream[0].Name != "entry" {
+		t.Error("restore aliases dump stream")
+	}
+	dest.freeFiles[0] = 77
+	if data.FreeFiles[0] != free {
+		t.Error("restore aliases free handles")
+	}
+	dest.freeFiles[0] = free
+	if got := dest.registerFile(fuse.Owner{}, "reuse", 99, nil); got != free {
+		t.Fatalf("reused %d, want %d", got, free)
+	}
+	dest.Forget(n.ino, 2)
+	if dest.inodeSafe(n.ino) != nil {
+		t.Error("restored references cannot be forgotten")
+	}
+}
+
+func TestRestoreRejectsIncompleteInodes(t *testing.T) {
+	tests := []struct {
+		name    string
+		count   int
+		entries []*DumpInode
+	}{
+		{"duplicate", 2, []*DumpInode{{Ino: 1, IsDir: true}, {Ino: 1, IsDir: true}}},
+		{"missing parent", 2, []*DumpInode{{Ino: 1, IsDir: true}, {Ino: 2, Parents: []DumpParentEntry{{Node: 3, Name: "file"}}}}},
+		{"extra inode", 1, []*DumpInode{{Ino: 1, IsDir: true}, {Ino: 2}}},
+		{"missing root record", 1, []*DumpInode{{Ino: 2, Parents: []DumpParentEntry{{Node: 1, Name: "file"}}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newTestBridge()
+			filler, err := b.Restore(&DumpRawBridge{NodeCount: tt.count, Files: []*DumpFileEntry{{}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range tt.entries {
+				if err = filler.AddInode(entry); err != nil {
+					return
+				}
+			}
+			if err = filler.Finished(); err == nil {
+				t.Fatal("accepted incomplete or duplicate inode records")
+			}
+		})
 	}
 }

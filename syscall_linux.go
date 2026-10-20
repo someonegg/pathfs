@@ -7,19 +7,23 @@ import (
 )
 
 func utimes(path string, atime *time.Time, mtime *time.Time) error {
-	timevals := []syscall.Timeval{
-		{Sec: atime.Unix(), Usec: int64(atime.Nanosecond())},
-		{Sec: mtime.Unix(), Usec: int64(mtime.Nanosecond())},
+	var st syscall.Stat_t
+	if atime == nil || mtime == nil {
+		if err := syscall.Stat(path, &st); err != nil {
+			return err
+		}
 	}
-	return syscall.Utimes(path, timevals)
+	return syscall.Utimes(path, timestampValues(atime, mtime, time.Unix(st.Atim.Sec, st.Atim.Nsec), time.Unix(st.Mtim.Sec, st.Mtim.Nsec)))
 }
 
 func fUtimes(fd int, atime *time.Time, mtime *time.Time) error {
-	timevals := []syscall.Timeval{
-		{Sec: atime.Unix(), Usec: int64(atime.Nanosecond())},
-		{Sec: mtime.Unix(), Usec: int64(mtime.Nanosecond())},
+	var st syscall.Stat_t
+	if atime == nil || mtime == nil {
+		if err := syscall.Fstat(fd, &st); err != nil {
+			return err
+		}
 	}
-	return syscall.Futimes(fd, timevals)
+	return syscall.Futimes(fd, timestampValues(atime, mtime, time.Unix(st.Atim.Sec, st.Atim.Nsec), time.Unix(st.Mtim.Sec, st.Mtim.Nsec)))
 }
 
 func setXAttr(path string, attr string, data []byte, flags int) error {

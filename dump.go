@@ -3,8 +3,9 @@ package pathfs
 import (
 	"errors"
 	"fmt"
-	"github.com/hanwen/go-fuse/v2/fuse"
 	"io"
+
+	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
 type DumpFileEntry struct {
@@ -42,21 +43,31 @@ type InodeIterator interface {
 	Next() (data *DumpInode, err error)
 }
 
+// Copier transfers bridge bookkeeping, not file contents or backend resources.
+// Stop and drain requests before Dump or Restore. Dump captures an independent
+// snapshot; its iterator may be consumed after source requests resume. Create the
+// destination with NewPathFS to supply its backend and options, then call Restore,
+// AddInode for every record, and Finished before serving requests. If any step
+// fails, discard the destination. Backend handles and the FUSE connection must be
+// preserved or transferred separately by the caller.
 type Copier interface {
 	Dump() (data *DumpRawBridge, iterator InodeIterator, err error)
 	Restore(data *DumpRawBridge) (filler InodeFiller, err error)
 }
 
 type InodeDumper struct {
-	inodes []*inode // flatted inodesMap
+	inodes []*DumpInode
 	off    int
 }
 
 func NewInodeDumper(inodesMap map[uint64]*inode) *InodeDumper {
-	inodes := make([]*inode, len(inodesMap))
+	inodes := make([]*DumpInode, len(inodesMap))
 	i := 0
 	for _, v := range inodesMap {
-		inodes[i] = v
+		inodes[i] = &DumpInode{
+			Ino: v.ino, Revision: v.revision, LookupCount: v.lookupCount,
+			Parents: v.parents.Dump(), IsDir: v.isDir(),
+		}
 		i++
 	}
 
@@ -70,29 +81,21 @@ func (s *InodeDumper) Next() (data *DumpInode, err error) {
 	if s.off >= len(s.inodes) {
 		return nil, io.EOF
 	}
-	node := s.inodes[s.off]
-
-	data = &DumpInode{
-		node.ino,
-		node.revision,
-		node.lookupCount,
-		node.parents.Dump(),
-		node.isDir(),
-	}
+	data = s.inodes[s.off]
 	s.off++
 	return data, nil
 }
 
 type InodeFiller interface {
 	AddInode(*DumpInode) error
-	// update bridge's root, may be removed
+	// Finished validates completeness and installs the restored root.
 	Finished() error
 }
 
 type InodeRestorer struct {
-	nodeCount    int
-	addNodeCount int
-	bridge       *rawBridge
+	nodeCount int
+	seen      map[uint64]bool
+	bridge    *rawBridge
 }
 
 // if not found in bridge's inodes, insert a new one and return it
@@ -112,6 +115,16 @@ func (s *InodeRestorer) getDirInode(ino uint64) *inode {
 }
 
 func (s *InodeRestorer) AddInode(dumpInode *DumpInode) error {
+	if dumpInode == nil {
+		return errors.New("nil inode record")
+	}
+	if s.seen[dumpInode.Ino] {
+		return fmt.Errorf("duplicate inode %d", dumpInode.Ino)
+	}
+	if s.seen == nil {
+		s.seen = make(map[uint64]bool)
+	}
+	s.seen[dumpInode.Ino] = true
 
 	inodes := s.bridge.nodes
 	var curInode *inode
@@ -137,31 +150,20 @@ func (s *InodeRestorer) AddInode(dumpInode *DumpInode) error {
 		curInode.parents.add(parentEntry{name: p.Name, node: parInode})
 	}
 
-	s.addNodeCount++
-
 	return nil
 }
 
-// Finished restore root inode and verify inode's count
+// Finished verifies that every inode, including referenced parents, was restored.
 func (s *InodeRestorer) Finished() error {
 	bridge := s.bridge
-
-	if root, found := s.bridge.nodes[1]; !found {
-		return errors.New("root inode not found")
-	} else {
-		bridge.root = root
+	root := bridge.nodes[1]
+	if !s.seen[1] || root == nil || !root.isDir() {
+		return errors.New("root directory inode not found")
 	}
-
-	if s.addNodeCount < s.nodeCount {
-		for _, n := range s.bridge.nodes {
-			if n.revision == 0 {
-				bridge.logf("warning: inode %d is lost.\n", n.ino)
-			}
-		}
-		return fmt.Errorf("expected %d inodes, but only got %d inodes", s.nodeCount, s.addNodeCount)
+	if len(s.seen) != s.nodeCount || len(bridge.nodes) != s.nodeCount {
+		return fmt.Errorf("expected %d inodes, got %d records and %d referenced inodes", s.nodeCount, len(s.seen), len(bridge.nodes))
 	}
-
-	s.bridge.nodeCountHigh = len(s.bridge.nodes)
-
+	bridge.root = root
+	bridge.nodeCountHigh = len(bridge.nodes)
 	return nil
 }

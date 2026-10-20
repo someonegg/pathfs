@@ -1,6 +1,7 @@
 package pathfs
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -29,10 +30,10 @@ func newResourceTestBridge() *resourceTestBridge {
 // TestNodeCount verifies that NodeCount returns the correct number of nodes
 func TestNodeCount(t *testing.T) {
 	tests := []struct {
-		name           string
-		initialCount   int
-		expectedCount  int
-		setupFunc      func(*rawBridge)
+		name          string
+		initialCount  int
+		expectedCount int
+		setupFunc     func(*rawBridge)
 	}{
 		{
 			name:          "empty bridge",
@@ -86,36 +87,37 @@ func TestNodeCount(t *testing.T) {
 // TestNodeCountConcurrency tests that NodeCount is thread-safe
 func TestNodeCountConcurrency(t *testing.T) {
 	b := newResourceTestBridge()
-
-	// Add some nodes
-	root := b.root
-	for i := 0; i < 100; i++ {
-		b.addChild(root, string(rune('a'+i)), uint64(i+10), false)
-	}
-
 	var wg sync.WaitGroup
-
-	// Run concurrent NodeCount calls
-	for i := 0; i < 10; i++ {
+	start := make(chan struct{})
+	for i := 0; i < 8; i++ {
 		wg.Add(1)
-		go func() {
+		go func(id int) {
 			defer wg.Done()
-			count := b.NodeCount()
-			if count <= 0 {
-				t.Errorf("NodeCount() returned invalid count: %d", count)
+			<-start
+			for j := 0; j < 200; j++ {
+				if id%2 == 0 {
+					// Each writer owns one inode/name, while readers inspect the map.
+					n := b.addChild(b.root, fmt.Sprintf("file-%d", id), uint64(100+id), false)
+					b.Forget(n.ino, 1)
+				} else if b.NodeCount() < 1 {
+					t.Error("lost root inode")
+				}
 			}
-		}()
+		}(i)
 	}
-
+	close(start)
 	wg.Wait()
+	if got := b.NodeCount(); got != 1 {
+		t.Fatalf("remaining nodes: %d", got)
+	}
 }
 
 // TestCompactMemoryBasic verifies compactMemory behavior under various conditions
 func TestCompactMemoryBasic(t *testing.T) {
 	tests := []struct {
-		name             string
-		setupFunc        func(*rawBridge)
-		shouldCompact    bool
+		name          string
+		setupFunc     func(*rawBridge)
+		shouldCompact bool
 	}{
 		{
 			name: "no compaction when under threshold",
@@ -558,40 +560,20 @@ func TestRmChildUpdatesRevisions(t *testing.T) {
 // TestResourceLifecycle tests the complete lifecycle of resource creation and cleanup
 func TestResourceLifecycle(t *testing.T) {
 	b := newResourceTestBridge()
-	root := b.root
-
-	// Create a directory hierarchy
-	dir1 := b.addChild(root, "dir1", 100, true)
-	dir2 := b.addChild(root, "dir2", 101, true)
-
-	_ = b.addChild(dir1, "file1", 102, false)
-	_ = b.addChild(dir1, "file2", 103, false)
-	_ = b.addChild(dir2, "file3", 104, false)
-
-	// Verify initial node count
-	initialCount := b.NodeCount()
-	if initialCount != 6 { // root + 2 dirs + 3 files
-		t.Logf("Initial node count = %d (expected 6)", initialCount)
+	dir := b.addChild(b.root, "dir", 100, true)
+	file := b.addChild(dir, "file", 101, false)
+	b.Forget(dir.ino, 1)
+	if b.NodeCount() != 3 || b.pathOf(file) != "dir/file" {
+		t.Fatal("forgot parent needed for path reconstruction")
 	}
-
-	// Remove file1
-	b.rmChild(dir1, "file1")
-
-	// Node count behavior is complex - just log it
-	newCount := b.NodeCount()
-	t.Logf("After removing file1, node count = %d", newCount)
-
-	// Remove remaining files
-	b.rmChild(dir1, "file2")
-	b.rmChild(dir2, "file3")
-
-	// Directories should now be removable
-	b.rmChild(root, "dir1")
-	b.rmChild(root, "dir2")
-
-	// Verify final state
-	finalCount := b.NodeCount()
-	t.Logf("Final node count = %d", finalCount)
+	b.rmChild(dir, "file")
+	if b.NodeCount() != 2 {
+		t.Fatal("unreferenced empty directory was not reclaimed")
+	}
+	b.Forget(file.ino, 1)
+	if b.NodeCount() != 1 {
+		t.Fatal("orphan was not reclaimed after Forget")
+	}
 }
 
 // TestConcurrentAddRemove tests concurrent add and remove operations

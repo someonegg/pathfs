@@ -19,6 +19,10 @@ import (
 // FileSystem API that uses paths rather than inodes. A minimal
 // file system should have at least a functional GetAttr method, and
 // the returned attr needs to have a valid Ino.
+// Paths are relative to the mount root, which is represented by "".
+// Inode numbers must be stable and unique within the filesystem; 1 is reserved
+// for the root. Operations on open handles receive the path saved at open time,
+// which may be stale after a rename or unlink. Use uFh to identify open files.
 // Typically, each call happens in its own goroutine, so take care to
 // make the file system thread-safe.
 type FileSystem interface {
@@ -53,6 +57,7 @@ type FileSystem interface {
 	Write(ctx *Context, path string, uFh uint32, data []byte, off uint64) (written uint32, code fuse.Status)
 	Fallocate(ctx *Context, path string, uFh uint32, off uint64, size uint64, mode uint32) fuse.Status
 	Fsync(ctx *Context, path string, uFh uint32, flags uint32) fuse.Status
+	// Flush may be called more than once per open file; lockOwner identifies the lock owner.
 	Flush(ctx *Context, path string, uFh uint32, lockOwner uint64) fuse.Status
 	Release(ctx *Context, path string, uFh uint32)
 
@@ -64,6 +69,7 @@ type FileSystem interface {
 	Chmod(ctx *Context, path string, uFh uint32, mode uint32) fuse.Status
 	Chown(ctx *Context, path string, uFh uint32, uid uint32, gid uint32) fuse.Status
 	Truncate(ctx *Context, path string, uFh uint32, size uint64) fuse.Status
+	// A nil timestamp leaves that field unchanged.
 	Utimens(ctx *Context, path string, uFh uint32, atime *time.Time, mtime *time.Time) fuse.Status
 
 	// Directory

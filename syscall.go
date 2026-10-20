@@ -1,6 +1,10 @@
 package pathfs
 
-import "bytes"
+import (
+	"bytes"
+	"syscall"
+	"time"
+)
 
 func listXAttr(path string) (attributes []string, err error) {
 	dest := make([]byte, 0)
@@ -14,6 +18,9 @@ func listXAttr(path string) (attributes []string, err error) {
 		sz, err = listXAttrSyscall(path, dest)
 	}
 
+	if err != nil {
+		return nil, err
+	}
 	if sz == 0 {
 		return nil, err
 	}
@@ -42,4 +49,15 @@ func getXAttr(path string, attr string) ([]byte, error) {
 	}
 
 	return dest[:sz], nil
+}
+
+// timestampValues preserves omitted fields; timeval precision is microseconds.
+func timestampValues(atime, mtime *time.Time, oldAtime, oldMtime time.Time) []syscall.Timeval {
+	if atime != nil {
+		oldAtime = *atime
+	}
+	if mtime != nil {
+		oldMtime = *mtime
+	}
+	return []syscall.Timeval{syscall.NsecToTimeval(oldAtime.UnixNano()), syscall.NsecToTimeval(oldMtime.UnixNano())}
 }

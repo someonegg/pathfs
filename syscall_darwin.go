@@ -8,19 +8,23 @@ import (
 )
 
 func utimes(path string, atime *time.Time, mtime *time.Time) error {
-	timevals := []syscall.Timeval{
-		{Sec: atime.Unix(), Usec: int32(atime.Nanosecond())},
-		{Sec: mtime.Unix(), Usec: int32(mtime.Nanosecond())},
+	var st syscall.Stat_t
+	if atime == nil || mtime == nil {
+		if err := syscall.Stat(path, &st); err != nil {
+			return err
+		}
 	}
-	return syscall.Utimes(path, timevals)
+	return syscall.Utimes(path, timestampValues(atime, mtime, time.Unix(st.Atimespec.Sec, st.Atimespec.Nsec), time.Unix(st.Mtimespec.Sec, st.Mtimespec.Nsec)))
 }
 
 func fUtimes(fd int, atime *time.Time, mtime *time.Time) error {
-	timevals := []syscall.Timeval{
-		{Sec: atime.Unix(), Usec: int32(atime.Nanosecond())},
-		{Sec: mtime.Unix(), Usec: int32(mtime.Nanosecond())},
+	var st syscall.Stat_t
+	if atime == nil || mtime == nil {
+		if err := syscall.Fstat(fd, &st); err != nil {
+			return err
+		}
 	}
-	return syscall.Futimes(fd, timevals)
+	return syscall.Futimes(fd, timestampValues(atime, mtime, time.Unix(st.Atimespec.Sec, st.Atimespec.Nsec), time.Unix(st.Mtimespec.Sec, st.Mtimespec.Nsec)))
 }
 
 func getXAttrSyscall(path string, attr string, dest []byte) (sz int, err error) {
@@ -88,13 +92,17 @@ func setXAttr(path string, attr string, data []byte, flags int) error {
 	if err != nil {
 		return err
 	}
+	var dataPointer unsafe.Pointer
+	if len(data) > 0 {
+		dataPointer = unsafe.Pointer(&data[0])
+	}
 	_, _, errNo := syscall.Syscall6(
 		syscall.SYS_SETXATTR,
 		uintptr(unsafe.Pointer(pathbs)),
 		uintptr(unsafe.Pointer(attrbs)),
-		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(dataPointer),
 		uintptr(len(data)),
-		uintptr(flags), 0)
+		0, uintptr(flags))
 
 	if errNo != 0 {
 		err = error(errNo)

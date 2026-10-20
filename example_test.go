@@ -1,10 +1,13 @@
+//go:build integration
+// +build integration
+
 package pathfs
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/hanwen/go-fuse/v2/fuse"
+	"io/ioutil"
 	"os"
 	fp "path/filepath"
 	"syscall"
@@ -12,33 +15,34 @@ import (
 	"time"
 )
 
-func setupTest() (mountPoint string, svr *fuse.Server) {
-	mountPoint = "/tmp/test_mount"
-	nativeRoot := "/tmp/test_native"
-	// clear old file
-	err := os.RemoveAll(mountPoint)
+func setupTest() (mountPoint string, cleanup func()) {
+	base, err := ioutil.TempDir("", "pathfs-integration-")
 	if err != nil {
 		panic(err)
 	}
-	err = os.RemoveAll(nativeRoot)
-	if err != nil {
-		panic(err)
+	mountPoint = fp.Join(base, "mount")
+	nativeRoot := fp.Join(base, "native")
+	for _, dir := range []string{mountPoint, nativeRoot} {
+		if err := os.Mkdir(dir, 0700); err != nil {
+			os.RemoveAll(base)
+			panic(err)
+		}
 	}
-	// create test directory
-	err = os.Mkdir(mountPoint, 0700)
-	if err != nil {
-		panic(err)
-	}
-	err = os.Mkdir(nativeRoot, 0700)
-	if err != nil {
-		panic(err)
-	}
-
 	server, err := Mount(mountPoint, NewTestFileSystem(nativeRoot), nil, nil)
 	if err != nil {
+		os.RemoveAll(base)
 		panic(err)
 	}
-	return mountPoint, server
+	return mountPoint, func() {
+		// Never recursively remove a mountpoint if unmounting failed.
+		if err := server.Unmount(); err != nil {
+			panic(err)
+		}
+		server.Wait()
+		if err := os.RemoveAll(base); err != nil {
+			panic(err)
+		}
+	}
 }
 
 func assertError(err error, expectedErr error) {
@@ -48,7 +52,7 @@ func assertError(err error, expectedErr error) {
 }
 
 func printDir(dir string) {
-	entries, err := os.ReadDir(dir)
+	entries, err := ioutil.ReadDir(dir)
 	for _, e := range entries {
 		fmt.Println(e.Name())
 	}
@@ -56,16 +60,9 @@ func printDir(dir string) {
 	fmt.Println()
 }
 
-func umount(server *fuse.Server) {
-	err := server.Unmount()
-	if err != nil {
-		fmt.Printf("unable to umount fs, err:%s\n", err)
-	}
-}
-
 func Example_dir() {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	dirPath := fp.Join(mountPoint, "test_dir")
 
@@ -81,13 +78,14 @@ func Example_dir() {
 	// create a file in an existing directory
 	filePath := fp.Join(dirPath, "test_file")
 	fd, err := syscall.Open(filePath, syscall.O_CREAT, regPerm)
+	assertError(err, nil)
 	err = syscall.Close(fd)
 	assertError(err, nil)
 	err = syscall.Stat(filePath, &st)
 	assertError(err, nil)
 
 	// create a file in a non-existent directory
-	fd, err = syscall.Open(fp.Join(mountPoint, "test_dir_1/test_file"), syscall.O_CREAT, regPerm)
+	_, err = syscall.Open(fp.Join(mountPoint, "test_dir_1/test_file"), syscall.O_CREAT, regPerm)
 	assertError(err, syscall.ENOENT)
 
 	// create a sub directory
@@ -157,8 +155,8 @@ func Example_dir() {
 }
 
 func Example_io() {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 	testFilePath := fp.Join(mountPoint, "test_file")
 
 	testContent := []byte("test_content,test_content,test_content,test_content")
@@ -166,8 +164,8 @@ func Example_io() {
 	// create a file and write some buf
 	func() {
 		file, err := os.Create(testFilePath)
-		defer file.Close()
 		assertError(err, nil)
+		defer file.Close()
 		_, err = file.Write(testContent)
 		assertError(err, nil)
 	}()
@@ -180,7 +178,7 @@ func Example_io() {
 	buf := bytes.Buffer{}
 	bs := make([]byte, 16)
 	n, err := syscall.Read(fd, bs)
-	buf.Write(bs)
+	buf.Write(bs[:n])
 	for n == 16 && err == nil {
 		n, err = syscall.Read(fd, bs)
 		buf.Write(bs[:n])
@@ -194,13 +192,14 @@ func Example_io() {
 }
 
 func TestAttr(t *testing.T) {
-	mountPoint, server := setupTest()
-	defer umount(server)
+	mountPoint, cleanup := setupTest()
+	defer cleanup()
 
 	st := syscall.Stat_t{}
 	path := fp.Join(mountPoint, "test_file")
 
 	fd, err := syscall.Open(path, syscall.O_CREAT|syscall.O_TRUNC, 0700)
+	assertError(err, nil)
 	err = syscall.Close(fd)
 
 	assertError(err, nil)
