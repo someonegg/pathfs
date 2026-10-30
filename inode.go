@@ -162,6 +162,12 @@ func (b *rawBridge) removeRef(n *inode, nlookup uint32) (removed bool) {
 	}
 
 	b.mu.Lock()
+	// A delayed cleanup of an old object must not remove a newer incarnation.
+	if b.nodes[n.ino] != n {
+		b.mu.Unlock()
+		n.mu.Unlock()
+		return false
+	}
 	delete(b.nodes, n.ino)
 	b.mu.Unlock()
 
